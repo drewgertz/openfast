@@ -92,7 +92,6 @@ IMPLICIT NONE
     REAL(ReKi)  :: alphaBreakLower = 0.0_ReKi      !< (calculated) Angle of attack where normal and reverse flow CnAttached intersect; between -pi and 0; will be near -pi/2 deg in most cases [rad]
     REAL(ReKi)  :: CnBreakLower = 0.0_ReKi      !< (calculated) CnAttached value at alphaBreakLower where normal and reverse flow CnAttached intersect; will be negative [-]
   END TYPE AFI_UA_BL_Type
-! =======================
 ! =========  AFI_UA_BL_Default_Type  =======
   TYPE, PUBLIC :: AFI_UA_BL_Default_Type
     LOGICAL  :: alpha0 = .true.      !< Calculate value for this input? [-]
@@ -146,6 +145,18 @@ IMPLICIT NONE
     TYPE(AFI_UA_BL_Type)  :: UA_BL      !< The tables of Leishman-Beddoes unsteady-aero data for given Re and control setting [-]
   END TYPE AFI_Table_Type
 ! =======================
+! =========  RotCorr_InputType  =======  
+  TYPE, PUBLIC :: RotCorr_InputType
+    real(ReKi)        :: tsr			= 0.0_ReKi
+    real(ReKi)        :: AOA            = 0.0_ReKi
+    real(ReKi)        :: rLocal         = 0.0_ReKi
+    real(ReKi)        :: rMax           = 0.0_ReKi
+    real(ReKi)        :: chord          = 0.0_ReKi
+    real(ReKi)        :: r_over_R       = 0.0_ReKi
+    real(ReKi)        :: chord_over_r   = 0.0_ReKi
+    INTEGER(IntKi)    :: RotCor = 0_IntKi
+  END TYPE RotCorr_InputType  
+! =======================
 ! =========  AFI_InitInputType  =======
   TYPE, PUBLIC :: AFI_InitInputType
     CHARACTER(1024)  :: FileName      !< The name of the file the data is read from [-]
@@ -156,6 +167,7 @@ IMPLICIT NONE
     INTEGER(IntKi)  :: InCol_Cm = 0_IntKi      !< The column of the coefficient tables that holds the pitching-moment coefficient [-]
     INTEGER(IntKi)  :: InCol_Cpmin = 0_IntKi      !< The column of the coefficient tables that holds the minimum pressure coefficient [-]
     INTEGER(IntKi)  :: UAMod = 0_IntKi      !< UA model: used to determine how UA separation functions should be calculated [-]
+	TYPE(RotCorr_InputType)  :: RotCorParams      !< inputs to the rotational correction
   END TYPE AFI_InitInputType
 ! =======================
 ! =========  AFI_InitOutputType  =======
@@ -182,6 +194,7 @@ IMPLICIT NONE
     TYPE(AFI_Table_Type) , DIMENSION(:), ALLOCATABLE  :: Table      !< The tables of airfoil data for given Re and control setting [-]
     CHARACTER(1024)  :: BL_file      !< The name of the file with the boundary layer data [-]
     CHARACTER(1024)  :: FileName      !< The name of the file that stored this information. [-]
+	TYPE(RotCorr_InputType)  :: RotCorParams      !< inputs to the rotational correction
   END TYPE AFI_ParameterType
 ! =======================
 ! =========  AFI_InputType  =======
