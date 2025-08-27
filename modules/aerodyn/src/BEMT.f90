@@ -52,7 +52,7 @@ module BEMT
    public :: BEMT_CalcConstrStateResidual        ! Tight coupling routine for returning the constraint state residual
    public :: BEMT_CalcContStateDeriv             ! Tight coupling routine for computing derivatives of continuous states
    public :: BEMT_UpdateDiscState                ! Tight coupling routine for updating discrete states
-   
+ 
    public :: BEMT_ReInit
    ! routines for linearization
    public :: Get_phi_perturbations
@@ -184,6 +184,7 @@ subroutine BEMT_SetParameters( InitInp, p, errStat, errMsg )
    p%UA_Flag        = InitInp%UA_Flag   
    p%DBEMT_Mod      = InitInp%DBEMT_Mod
    p%BEM_Mod        = InitInp%BEM_Mod
+
    !call WrScr('>>>> BEM_Mod '//trim(num2lstr(p%BEM_Mod)))
    if (.not.(ANY( p%BEM_Mod == (/BEMMod_2D, BEMMod_3D/)))) then
       call SetErrStat( ErrID_Fatal, 'BEM_Mod needs to be 0 or 2 for now', errStat, errMsg, RoutineName )
@@ -712,7 +713,6 @@ subroutine BEMT_Init( InitInp, u, p, x, xd, z, OtherState, AFInfo, y, misc, Inte
    
 
    InitOut%Version = BEMT_Ver
-   
  
    call AllocAry(misc%AxInduction, p%numBladeNodes,p%numBlades,'misc%AxInduction',  errStat2,errMsg2); call SetErrStat(errStat2,errMsg2,errStat,errMsg,RoutineName)
    call AllocAry(misc%TanInduction,p%numBladeNodes,p%numBlades,'misc%TanInduction', errStat2,errMsg2); call SetErrStat(errStat2,errMsg2,errStat,errMsg,RoutineName)
@@ -1281,14 +1281,15 @@ subroutine BEMT_CalcOutput( t, u, p, x, xd, z, OtherState, AFInfo, y, m, errStat
    type(BEMT_ConstraintStateType), intent(in   )  :: z           ! Constraint states at t
    type(BEMT_OtherStateType),      intent(in   )  :: OtherState  ! Other states at t
    type(BEMT_MiscVarType),         intent(inout)  :: m           ! Misc/optimization variables
-   type(AFI_ParameterType),        intent(in   )  :: AFInfo(:)   ! The airfoil parameter data
+   type(AFI_ParameterType),        intent(inout)  :: AFInfo(:)   ! The airfoil parameter data
    type(BEMT_OutputType),          intent(inout)  :: y           ! Outputs computed at t (Input only so that mesh con-
-                                                                 !   nectivity information does not have to be recalculated)
+                                                                 !   nectivity information does not have to be recalculated)																 
+   
    integer(IntKi),                 intent(  out)  :: errStat     ! Error status of the operation
    character(*),                   intent(  out)  :: errMsg      ! Error message if ErrStat /= ErrID_None
       ! Local variables:
 
-   integer(IntKi)                                 :: i                                               ! Generic index
+   integer(IntKi)                                 :: i                                             ! Generic index
    integer(IntKi)                                 :: j                                               ! Loops through nodes / elements
    integer(IntKi), parameter                      :: InputIndex=1      ! we will always use values at t in this routine
    
@@ -1344,11 +1345,12 @@ subroutine BEMT_CalcOutput( t, u, p, x, xd, z, OtherState, AFInfo, y, m, errStat
    
       ! Now depending on the option for UA get the airfoil coefs, Cl, Cd, Cm for unsteady or steady implementation
    if (p%UA_Flag ) then
-   
+
       do j = 1,p%numBlades ! Loop through all blades
          do i = 1,p%numBladeNodes ! Loop through the blade nodes / elements
 
-            call UA_CalcOutput(i, j, t, m%u_UA(i,j,InputIndex), p%UA, x%UA, xd%UA, OtherState%UA, AFInfo(p%AFindx(i,j)), m%y_UA, m%UA, errStat2, errMsg2 )
+		    call BEMT_assembleRotCorParams(AFInfo(p%AFindx(i,j))%RotCorParams, y, p, u, i, j)
+            call UA_CalcOutput(i, j, t, m%u_UA(i,j,InputIndex), p%UA, x%UA, xd%UA, OtherState%UA, AFInfo(p%AFindx(i,j)), m%y_UA, m%UA, errStat2, errMsg2)
                if (ErrStat2 /= ErrID_None) then
                   call SetErrStat(ErrStat2,ErrMsg2,ErrStat,ErrMsg,RoutineName//trim(NodeText(i,j)))
                   if (errStat >= AbortErrLev) return
@@ -1369,12 +1371,14 @@ subroutine BEMT_CalcOutput( t, u, p, x, xd, z, OtherState, AFInfo, y, m, errStat
             ! compute steady Airfoil Coefs
       do j = 1,p%numBlades ! Loop through all blades
          do i = 1,p%numBladeNodes ! Loop through the blade nodes / elements
-         
-            call AFI_ComputeAirfoilCoefs( y%AOA(i,j), y%Re(i,j), u%UserProp(i,j),  AFInfo(p%AFindx(i,j)), AFI_interp, errStat2, errMsg2 )
-               if (ErrStat2 /= ErrID_None) then
-                  call SetErrStat(ErrStat2,ErrMsg2,ErrStat,ErrMsg,RoutineName//trim(NodeText(i,j)))
-                  if (errStat >= AbortErrLev) return
-               end if
+
+			call BEMT_assembleRotCorParams(AFInfo(p%AFindx(i,j))%RotCorParams, y, p, u, i, j)
+			call AFI_ComputeAirfoilCoefs( y%AOA(i,j), y%Re(i,j), u%UserProp(i,j), AFInfo(p%AFindx(i,j)), AFI_interp, errStat2, errMsg2)		
+			
+            if (ErrStat2 /= ErrID_None) then
+               call SetErrStat(ErrStat2,ErrMsg2,ErrStat,ErrMsg,RoutineName//trim(NodeText(i,j)))
+               if (errStat >= AbortErrLev) return
+            end if
             y%Cl(i,j) = AFI_interp%Cl
             y%Cd(i,j) = AFI_interp%Cd
             y%Cm(i,j) = AFI_interp%Cm
@@ -1410,7 +1414,38 @@ subroutine BEMT_CalcOutput( t, u, p, x, xd, z, OtherState, AFInfo, y, m, errStat
    return
 
 end subroutine BEMT_CalcOutput
+!----------------------------------------------------------------------------------------------------------------------------------
+subroutine BEMT_assembleRotCorParams(RotCorParams, y, p, u, i, j)
+    ! @param RotCorParams: The output structure containing all assembled parameters.
+    ! @param y: The AeroDyn output structure.
+    ! @param p: The AeroDyn parameter structure.
+    ! @param u: The AeroDyn input structure.
+    ! @param i: The index for the blade node.
+    ! @param j: The index for the blade.
 
+    implicit none
+    
+    ! Variable declarations
+    type(RotCorr_InputType), intent(inout) :: RotCorParams
+    type(BEMT_OutputType),          intent(inout)  :: y           ! Outputs computed at t
+    type(BEMT_ParameterType),       intent(in   )  :: p           ! Parameters
+    type(BEMT_InputType),           intent(in   )  :: u           ! Inputs at Time t
+    integer(IntKi),          intent(in)  :: i, j
+    
+    ! Assemble the parameters into the RotCorParams structure
+    !RotCorParams%RotCor already assigned
+    RotCorParams%tsr            = abs(u%TSR)
+    RotCorParams%AOA            = y%AOA(i,j)
+    RotCorParams%rLocal         = u%rLocal(i,j)
+    RotCorParams%rMax           = p%rTipFixMax
+    RotCorParams%chord          = p%chord(i,j)
+
+    ! Calculate normalized ratios with a safe divide to avoid division by zero.
+    ! merge(x,y,condition) returns x if condition is true, y otherwise.
+    RotCorParams%r_over_R     = merge(RotCorParams%rLocal/RotCorParams%rMax, 0.0_ReKi, RotCorParams%rMax > tiny(1.0_ReKi))
+    RotCorParams%chord_over_r = merge(RotCorParams%chord/RotCorParams%rLocal, 0.0_ReKi, RotCorParams%rLocal > tiny(1.0_ReKi))
+	
+end subroutine BEMT_assembleRotCorParams
 !----------------------------------------------------------------------------------------------------------------------------------
 !> Routine used in linearization to get the states initialized properly at t=0 (before perturbing things)
 subroutine BEMT_InitStates(t, u, p, x, xd, z, OtherState, m, AFInfo, ErrStat, ErrMsg )

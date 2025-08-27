@@ -27,6 +27,7 @@ MODULE AirfoilInfo
    USE                                             AirfoilInfo_Types
    USE                                          :: ISO_FORTRAN_ENV , ONLY : IOSTAT_EOR
    USE                                          :: NWTC_LAPACK
+   USE 											:: NWTC_Library_Types
 
    IMPLICIT NONE
 
@@ -119,6 +120,8 @@ CONTAINS
              
          ! Set the lookup model:  1 = 1D, 2 = 2D based on (AoA,Re), 3 = 2D based on (AoA,UserProp)
       p%AFTabMod   = InitInput%AFTabMod
+         ! Set the rotor correction params (only the switch RotCor is really necessary here but it is contained in RotCorParams)
+      p%RotCorParams   = InitInput%RotCorParams	  
       
          ! Set the column indices for the various airfoil coefficients as they will be stored in our data structures, 
          !   NOT as they are recorded in the airfoil input file (InitInput%InCol_*) !
@@ -1789,21 +1792,20 @@ subroutine AFI_ComputeAirfoilCoefs1D( AOA, p, AFI_interp, errStat, errMsg, Table
    
    
 end subroutine AFI_ComputeAirfoilCoefs1D
-
 !----------------------------------------------------------------------------------------------------------------------------------  
 !> This routine calculates Cl, Cd, Cm, (and Cpmin) for a set of tables which are dependent on AOA as well as a 2nd user-defined varible, could be Re or Cntrl, etc.
-subroutine AFI_ComputeAirfoilCoefs( AOA, Re, UserProp, p, AFI_interp, errStat, errMsg )
+subroutine AFI_ComputeAirfoilCoefs( AOA, Re, UserProp, p, AFI_interp, errStat, errMsg)
 
-   real(ReKi),               intent(in   ) :: AOA
-   real(ReKi),               intent(in   ) :: Re                         ! Reynold's Number
-   real(ReKi),               intent(in   ) :: UserProp                   !< User property for interpolating airfoil tables
-   TYPE (AFI_ParameterType), intent(in   ) :: p                          ! This structure stores all the module parameters that are set by AirfoilInfo during the initialization phase.
-   type(AFI_OutputType),     intent(  out) :: AFI_interp                 ! contains   real(ReKi),               intent(  out) :: Cl, Cd, Cm, Cpmin
-   integer(IntKi),           intent(  out) :: errStat                    ! Error status of the operation
-   character(*),             intent(  out) :: errMsg                     ! Error message if ErrStat /= ErrID_None 
-
+   real(ReKi),                             intent(in   ) :: AOA
+   real(ReKi),                             intent(in   ) :: Re                         ! Reynold's Number
+   real(ReKi),                             intent(in   ) :: UserProp                   !< User property for interpolating airfoil tables
+   TYPE (AFI_ParameterType),               intent(in   ) :: p                          ! This structure stores all the module parameters that are set by AirfoilInfo during the initialization phase.
+   type(AFI_OutputType),                   intent(  out) :: AFI_interp                 ! contains   real(ReKi),               intent(  out) :: Cl, Cd, Cm, Cpmin
+   integer(IntKi),                         intent(  out) :: errStat                    ! Error status of the operation
+   character(*),                           intent(  out) :: errMsg                     ! Error message if ErrStat /= ErrID_None 
    real(ReKi)                              :: ReInterp
-
+   type(RotCorr_InputType)                               :: RotCorParams  
+   
       ! These coefs are stored in the p data structures based on Re
    
    if ( p%AFTabMod == AFITable_1 ) then 
@@ -1821,10 +1823,72 @@ subroutine AFI_ComputeAirfoilCoefs( AOA, Re, UserProp, p, AFI_interp, errStat, e
    
    ! put some limits on the separation function:
    AFI_interp%f_st = min( max( AFI_interp%f_st, 0.0_ReKi), 1.0_ReKi)  ! separation function
-
    
-end subroutine AFI_ComputeAirfoilCoefs
+   ! Apply rotational corrections
+   RotCorParams = p%RotCorParams
 
+   call AFI_ApplyRotCorr( AFI_interp, RotCorParams)
+
+end subroutine AFI_ComputeAirfoilCoefs
+!--------------------------------------------------------------------
+subroutine AFI_ApplyRotCorr( AFI_interp, RotCorParams)
+
+   implicit none
+   type(RotCorr_InputType),       intent(inout)   :: RotCorParams
+   type(AFI_OutputType),          intent(inout)   :: AFI_interp
+   integer(IntKi)                                 :: RotCor
+
+   RotCor = RotCorParams%RotCor
+
+   ! Apply rotational correction if requested
+   select case (RotCor)
+   case (1)  ! Snel
+      call AFI_ApplySnel(AFI_interp, RotCorParams)
+   case default
+      ! do nothing
+   end select   
+
+end subroutine AFI_ApplyRotCorr
+!----------------------------------------------------------------------------------------------------------------------------------
+subroutine AFI_ApplySnel(AFI_interp, RotCorParams)
+   implicit none
+   type(RotCorr_InputType),               intent(in)    :: RotCorParams
+   type(AFI_OutputType),                  intent(inout) :: AFI_interp
+   real(ReKi) :: AOA, r_over_R, chord_over_R, tsr, g, alpha_deg, m_est, alpha0_est, cl_lin, delta_cl, snel_factor, tsr_local, chord, rLocal, rMax
+   
+   tsr = RotCorParams%tsr
+   AOA = RotCorParams%AOA
+   rLocal = RotCorParams%rLocal
+   rMax = RotCorParams%rMax
+   chord = RotCorParams%chord
+   r_over_R = RotCorParams%r_over_R
+   chord_over_r = RotCorParams%chord_over_r
+   
+   ! calc delta_cl
+   ! --- quick linear lift estimate near small AoA (2*pi per rad, alpha0 ~ 0)
+   m_est     = 2.0_ReKi * Pi_D
+   alpha0_est= 0.0_ReKi
+   cl_lin    = m_est * ( AOA - alpha0_est )
+   delta_cl = cl_lin - AFI_interp%Cl 
+   
+   alpha_deg = ABS(AOA * 180.0_ReKi / Pi_D)
+
+   ! H. Snel, R. Houwink, and W. J. Piers. Sectional Prediction of 3D Effects for Separated Flow on Rotating Blades. 1993.
+   ! blending factor g(α) defined in degrees as per QBlade doc
+   if ((alpha_deg > 0.0_ReKi) .AND. (alpha_deg < 30.0_ReKi)) then
+      g = 1.0
+   elseif ( (alpha_deg >= 30.0_ReKi) .AND. (alpha_deg < 60.0_ReKi)) then
+      g = 0.5_ReKi * (1.0_ReKi + cos(D2R*(6.0_ReKi*alpha_deg - 180.0_ReKi)))
+   else ! alpha_deg >= 60 
+      g = 0.0_ReKi
+   end if
+
+   tsr_local=tsr* r_over_R  ! local tip-speed ratio
+   snel_factor = (3.1 * tsr_local**2 / (1.0 + tsr_local**2)) * g * (chord_over_r**2)
+
+   AFI_interp%Cl = AFI_interp%Cl + snel_factor * delta_cl 
+  
+end subroutine AFI_ApplySnel
 !----------------------------------------------------------------------------------------------------------------------------------  
 !> This routine calculates Cl, Cd, Cm, (and Cpmin) for a set of tables which are dependent on AOA as well as a 2nd user-defined varible, could be Re or Cntrl, etc.
 subroutine AFI_ComputeUACoefs( p, Re, UserProp, UA_BL, errMsg, errStat )

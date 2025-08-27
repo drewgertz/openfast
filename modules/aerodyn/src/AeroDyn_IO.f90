@@ -992,6 +992,9 @@ SUBROUTINE ParsePrimaryFileInfo( PriPath, InitInp, InputFile, RootName, NumBlade
       ! AFTabMod - Interpolation method for multiple airfoil tables {1=1D interpolation on AoA (first table only); 2=2D interpolation on AoA and Re; 3=2D interpolation on AoA and UserProp} (-)
    call ParseVar( FileInfo_In, CurLine, "AFTabMod", InputFileData%AFTabMod, ErrStat2, ErrMsg2, UnEc )
       if (Failed()) return
+      ! RotCor - Switch to indicate which rotational correction model to apply to the airfoil data tables (0 for none)
+   call ParseVar( FileInfo_In, CurLine, "RotCor", InputFileData%RotCor, ErrStat2, ErrMsg2, UnEc )
+      if (Failed()) return	 
       ! InCol_Alfa - The column in the airfoil tables that contains the angle of attack (-)
    call ParseVar( FileInfo_In, CurLine, "InCol_Alfa", InputFileData%InCol_Alfa, ErrStat2, ErrMsg2, UnEc )
       if (Failed()) return
