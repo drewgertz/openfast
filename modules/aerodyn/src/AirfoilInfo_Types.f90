@@ -132,6 +132,32 @@ IMPLICIT NONE
     LOGICAL  :: alphaLower = .true.      !< Calculate value for this input? [-]
   END TYPE AFI_UA_BL_Default_Type
 ! =======================
+! =========  RotCorr_InputType  =======  
+  TYPE, PUBLIC :: RotCorr_InputType
+    real(ReKi)        :: tsr			= 0.0_ReKi
+    real(ReKi)        :: AOA            = 0.0_ReKi
+    real(ReKi)        :: rLocal         = 0.0_ReKi
+    real(ReKi)        :: rMax           = 0.0_ReKi
+    real(ReKi)        :: chord          = 0.0_ReKi
+	INTEGER(IntKi)    :: RotCor = 0_IntKi
+    INTEGER(IntKi)    :: UAMod = 0_IntKi      !< UA model: used to determine how UA separation functions should be calculated [-]	
+    LOGICAL           :: UA_Flag = .false.      !< logical flag indicating whether to use UnsteadyAero [-]																																																		
+  END TYPE RotCorr_InputType  
+! =======================
+! =========  RotCorr_SnellTableType  =======  
+  TYPE, PUBLIC :: RotCorr_SnellTableType
+    real(ReKi)        :: snel_factor			= 0.0_ReKi ! Snell factor for the given table
+    REAL(ReKi) , DIMENSION(:), ALLOCATABLE  :: Alpha      !< Angle-of-attack vector that matches the Coefs matrix [rad]
+    REAL(ReKi) , DIMENSION(:,:), ALLOCATABLE  :: Coefs      !< Airfoil coefficients for Cd, Cl,  and maybe Cm and/or Cpmin [-]
+    REAL(ReKi) , DIMENSION(:,:,:), ALLOCATABLE  :: SplineCoefs      !< Spline coefficients for Cd, Cl,  and maybe Cm and/or Cpmin [-]
+    REAL(ReKi)  :: UserProp = 0.0_ReKi      !< User Property for a table, for example a Control setting [-]
+    REAL(ReKi)  :: Re = 0.0_ReKi      !< Reynolds number [-]
+    INTEGER(IntKi)  :: NumAlf = 0_IntKi      !< Length of the Alpha and Coefs arrays [-]
+    LOGICAL  :: ConstData = .false.      !< Flag that tells if aerodynamic coefficients are the same for all alphas [-]
+    LOGICAL  :: InclUAdata = .false.      !< Flag that tells if UA data is included in the input file [-]
+    TYPE(AFI_UA_BL_Type)  :: UA_BL      !< The tables of Leishman-Beddoes unsteady-aero data for given Re and control setting [-]
+  END TYPE RotCorr_SnellTableType
+! =======================
 ! =========  AFI_Table_Type  =======
   TYPE, PUBLIC :: AFI_Table_Type
     REAL(ReKi) , DIMENSION(:), ALLOCATABLE  :: Alpha      !< Angle-of-attack vector that matches the Coefs matrix [rad]
@@ -143,19 +169,8 @@ IMPLICIT NONE
     LOGICAL  :: ConstData = .false.      !< Flag that tells if aerodynamic coefficients are the same for all alphas [-]
     LOGICAL  :: InclUAdata = .false.      !< Flag that tells if UA data is included in the input file [-]
     TYPE(AFI_UA_BL_Type)  :: UA_BL      !< The tables of Leishman-Beddoes unsteady-aero data for given Re and control setting [-]
+	TYPE(RotCorr_SnellTableType) , DIMENSION(:), ALLOCATABLE  :: snelTables      !< The tables of airfoil data for given Re and control setting [-]d be calculated [-].	
   END TYPE AFI_Table_Type
-! =======================
-! =========  RotCorr_InputType  =======  
-  TYPE, PUBLIC :: RotCorr_InputType
-    real(ReKi)        :: tsr			= 0.0_ReKi
-    real(ReKi)        :: AOA            = 0.0_ReKi
-    real(ReKi)        :: rLocal         = 0.0_ReKi
-    real(ReKi)        :: rMax           = 0.0_ReKi
-    real(ReKi)        :: chord          = 0.0_ReKi
-    real(ReKi)        :: r_over_R       = 0.0_ReKi
-    real(ReKi)        :: chord_over_r   = 0.0_ReKi
-    INTEGER(IntKi)    :: RotCor = 0_IntKi
-  END TYPE RotCorr_InputType  
 ! =======================
 ! =========  AFI_InitInputType  =======
   TYPE, PUBLIC :: AFI_InitInputType
