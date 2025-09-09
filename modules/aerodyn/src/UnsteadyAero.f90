@@ -152,7 +152,8 @@ subroutine Get_f_from_Lookup( UAMod, Re, UserProp, alpha_in, alpha0, C_nalpha_ci
    real(ReKi)                       :: alpha_minus_alpha0
 
    ErrStat = ErrID_None
-   ErrMsg  = ''
+   ErrMsg  = ''  
+   
       ! NOTE:  This subroutine call cannot live in Blade Element because BE module calls UnsteadyAero module.
     
    
@@ -239,7 +240,7 @@ real(ReKi) function Get_f_c_from_Lookup( UAMod, Re, UserProp, alpha_in, alpha0_i
    real(ReKi),       intent(in   ) :: eta_e
    type(AFI_ParameterType), intent(in   ) :: AFInfo        ! The airfoil parameter data   
    integer(IntKi),   intent(  out) :: ErrStat       ! Error status of the operation
-   character(*),     intent(  out) :: ErrMsg        ! Error message if ErrStat /= ErrID_None
+   character(*),     intent(  out) :: ErrMsg        ! Error message if ErrStat /= ErrID_None 
    
    
    real(ReKi), parameter           :: fc_limit = (1.0_ReKi + Gonzalez_factor)**2    ! normally, fc is limited by 1, but we're limiting (sqrt(fc)-Gonzalez_factor) to 1, so fc is limited to 1.44 instead (when Gonzalez_factor is 0.2)
@@ -250,7 +251,8 @@ real(ReKi) function Get_f_c_from_Lookup( UAMod, Re, UserProp, alpha_in, alpha0_i
    real(ReKi)                      :: alpha0
 
    ErrStat = ErrID_None
-   ErrMsg  = ''
+   ErrMsg  = '' 
+   
       ! NOTE:  This subroutine call cannot live in Blade Element because BE module calls UnsteadyAero module.
    
       ! ensure that these angles are in appropriate ranges
@@ -274,7 +276,6 @@ real(ReKi) function Get_f_c_from_Lookup( UAMod, Re, UserProp, alpha_in, alpha0_i
       Get_f_c_from_Lookup = fc_limit
 
    else
-         
       call AFI_ComputeAirfoilCoefs( alpha, Re, UserProp,  AFInfo, AFI_interp, ErrStat, ErrMsg)
          if (ErrStat >= AbortErrLev) return
    
@@ -338,7 +339,7 @@ subroutine ComputeKelvinChain( i, j, u, p, xd, OtherState, misc, AFInfo, KC, BL_
    type(UA_DiscreteStateType),             intent(in   ) :: xd                ! Input: Discrete states at t;
    type(UA_OtherStateType),                intent(in   ) :: OtherState        ! Other states at t
    type(UA_MiscVarType),                   intent(inout) :: misc              ! Misc/optimization variables
-   type(AFI_ParameterType),                intent(in   ) :: AFInfo            ! The airfoil parameter data
+   type(AFI_ParameterType),                intent(in   ) :: AFInfo            ! The airfoil parameter data 
    
    
    type(AFI_UA_BL_Type),                   intent(  out) :: BL_p
@@ -427,7 +428,6 @@ subroutine ComputeKelvinChain( i, j, u, p, xd, OtherState, misc, AFInfo, KC, BL_
    KC%alpha_filt_cur = LowPassConst*alpha_filt_minus1 + (1.0_ReKi-LowPassConst)*u%alpha ! from eq 1.8 [1: typo in documentation, though]
    
    KC%dalpha0  = KC%alpha_filt_cur - BL_p%alpha0
-   
     
       ! Compute Kalpha using Eqn 1.7
   
@@ -1702,11 +1702,11 @@ subroutine UA_TurnOff_param(p, AFInfo, ErrStat, ErrMsg)
          ErrStat = ErrID_Fatal
          ErrMsg  = 'UA parameters are not included in airfoil.'
          return
-      else if ( (p%UAMod == UA_HGM .or. p%UAMod == UA_OYE .or. p%UAMod == UA_HGMV .or. p%UAMod==UA_HGMV360) .and. &
-                (maxval( AFInfo%Table(j)%Coefs(:, AFInfo%ColUAf) ) == 0.0_ReKi ) ) then
-         ErrStat = ErrID_Fatal
-         ErrMsg  = 'separation function is 0 at all values.'
-         return
+!      else if ( (p%UAMod == UA_HGM .or. p%UAMod == UA_OYE .or. p%UAMod == UA_HGMV .or. p%UAMod==UA_HGMV360) .and. &
+!                (maxval( AFInfo%Table(j)%Coefs(:, AFInfo%ColUAf) ) == 0.0_ReKi ) ) then
+!         ErrStat = ErrID_Fatal
+!         ErrMsg  = 'separation function is 0 at all values.'
+!         return
       end if
    end do
       
@@ -1715,13 +1715,13 @@ subroutine UA_TurnOff_param(p, AFInfo, ErrStat, ErrMsg)
    
    else if (p%UAMod == UA_HGM .or. p%UAMod == UA_OYE) then
       ! unsteady aerodynamics will be turned off if Cl,alpha = 0
-      do j=1, AFInfo%NumTabs
-         if ( EqualRealNos(AFInfo%Table(j)%UA_BL%C_lalpha, 0.0_ReKi) ) then
-            ErrStat = ErrID_Fatal
-            ErrMsg  = 'C_lalpha is 0.'
-            return
-         end if
-      end do
+!      do j=1, AFInfo%NumTabs
+!         if ( EqualRealNos(AFInfo%Table(j)%UA_BL%C_lalpha, 0.0_ReKi) ) then
+!            ErrStat = ErrID_Fatal
+!            ErrMsg  = 'C_lalpha is 0.'
+!            return
+!         end if
+!      end do
       
          ! now check about interpolated values:
       do j=2, AFInfo%NumTabs
@@ -2366,7 +2366,7 @@ subroutine UA_UpdateStates( i, j, t, n, u, uTimes, p, x, xd, OtherState, AFInfo,
 
    ErrStat   = ErrID_None           ! no error has occurred
    ErrMsg    = ""
-         
+  
    !BJJ: u%u == 0 seems to be the root cause of all sorts of numerical problems....
 
    if (p%UAMod == UA_None) return ! we don't have any states to update here
@@ -2383,8 +2383,7 @@ subroutine UA_UpdateStates( i, j, t, n, u, uTimes, p, x, xd, OtherState, AFInfo,
       call SetErrStat(ErrStat2, ErrMsg2, ErrStat, ErrMsg, RoutineName)
          
          
-   if (p%UAMod == UA_HGM .or. p%UAMod == UA_HGMV .or. p%UAMod == UA_OYE .or. p%UAMod == UA_HGMV360) then
-   
+   if (p%UAMod == UA_HGM .or. p%UAMod == UA_HGMV .or. p%UAMod == UA_OYE .or. p%UAMod == UA_HGMV360) then  
          ! initialize states to steady-state values:
       if (OtherState%FirstPass(i,j)) then
          call HGM_Steady( i, j, u_interp, p, x%element(i,j), AFInfo, ErrStat2, ErrMsg2 ) ! u_interp at t
@@ -2509,7 +2508,7 @@ subroutine UA_UpdateStates( i, j, t, n, u, uTimes, p, x, xd, OtherState, AFInfo,
       
    end if
 
-   OtherState%FirstPass(i,j)   = .false.
+   OtherState%FirstPass(i,j)   = .false.  
    
 end subroutine UA_UpdateStates
 !==============================================================================
@@ -2616,6 +2615,7 @@ SUBROUTINE HGM_Steady( i, j, u, p, x, AFInfo, ErrStat, ErrMsg )
     
    alphaE   = alpha_34                                                    ! Eq. 12 (after substitute of x1 and x2 initializations)
    alphaF   = alphaE
+
    call AFI_ComputeAirfoilCoefs( alphaF, u%Re, u%UserProp, AFInfo, AFI_interp, ErrStat2, ErrMsg2)
       call SetErrStat(ErrStat2,ErrMsg2,ErrStat,ErrMsg,RoutineName)
 
@@ -2698,10 +2698,10 @@ subroutine UA_CalcContStateDeriv( i, j, t, u_in, p, x, OtherState, AFInfo, m, dx
 
    ErrStat = ErrID_None
    ErrMsg  = ""
-
+   
    ! initialize for models that don't use all of the state terms:
    dxdt%x    = 0.0_R8Ki
-      
+   
    if (p%UA_off_forGood(i,j)) return
    
       ! make sure that u%u is not zero (this previously turned off UA for the entire simulation. 
@@ -2717,7 +2717,7 @@ subroutine UA_CalcContStateDeriv( i, j, t, u_in, p, x, OtherState, AFInfo, m, dx
    
       
    call Get_HGM_constants(i, j, p, u, x, BL_p, Tu, alpha_34, alphaE) ! compute Tu, alpha_34, and alphaE
-    
+   
       ! fix definitions of T_f0 and T_p (based on email from Emmanuel 12-28-20 regarding HAWC2 default values)
    BL_p%T_f0 = BL_p%T_f0 * Tu ! Emmanuel wants a factor of 2 here to match HAWC2, but we don't want that factor for Bladed comparisons
    BL_p%T_p  = BL_p%T_p  * Tu
@@ -2728,11 +2728,10 @@ subroutine UA_CalcContStateDeriv( i, j, t, u_in, p, x, OtherState, AFInfo, m, dx
       ! calculate fs_aF (stored in AFI_interp%f_st):
     ! find alphaF where FullyAttached(alphaF) = x(3)
    alphaF = Get_alphaF(p, u, x, BL_p, alpha_34, alphaE)
-   
+
    call AFI_ComputeAirfoilCoefs( alphaF, u%Re, u%UserProp, AFInfo, AFI_AlphaF, ErrStat2, ErrMsg2)
       call SetErrStat(ErrStat2,ErrMsg2,ErrStat,ErrMsg,RoutineName)
       if (ErrStat >= AbortErrLev) return
-   
       
    ! States
    !x1: Downwash memory term 1 (rad)
@@ -2761,7 +2760,7 @@ subroutine UA_CalcContStateDeriv( i, j, t, u_in, p, x, OtherState, AFInfo, m, dx
       dxdt%x(4) = ( AFI_AlphaF%f_st - x4     ) / BL_p%T_f0             ! Eq. 11 [40]
       dxdt%x(5) = 0.0_R8Ki
 
-   elseif (p%UAMod == UA_OYE) then
+   elseif (p%UAMod == UA_OYE) then    
       dxdt%x(4) = ( AFI_AlphaF%f_st - x4     ) / BL_p%T_f0
       dxdt%x(1) = 0.0_R8Ki
       dxdt%x(2) = 0.0_R8Ki
@@ -2769,7 +2768,6 @@ subroutine UA_CalcContStateDeriv( i, j, t, u_in, p, x, OtherState, AFInfo, m, dx
       dxdt%x(5) = 0.0_R8Ki
 
    elseif (p%UAMod == UA_HGMV .OR. p%UAMod == UA_HGMV360) then
-
       call AFI_ComputeAirfoilCoefs( alphaE, u%Re, u%UserProp, AFInfo, AFI_AlphaE, ErrStat2, ErrMsg2)
          call SetErrStat(ErrStat2,ErrMsg2,ErrStat,ErrMsg,RoutineName)
          if (ErrStat >= AbortErrLev) return
@@ -3000,12 +2998,12 @@ SUBROUTINE UA_RK4( i, j, t, n, u, utimes, p, x, OtherState, AFInfo, m, ErrStat, 
       ErrMsg  = "" 
 
       ! interpolate u to find u_interp = u(t)
+
       CALL UA_Input_ExtrapInterp( u, utimes, u_interp, t, ErrStat2, ErrMsg2 ) ! don't need to fix inputs after this call because UA_CalcContStateDeriv() calls that routine
          CALL SetErrStat(ErrStat2,ErrMsg2,ErrStat,ErrMsg,RoutineName)
          IF ( ErrStat >= AbortErrLev ) RETURN
 
       x_tmp     = x%element(i,j)
-      
       ! find xdot at t
       CALL UA_CalcContStateDeriv( i, j, t, u_interp, p, x_tmp, OtherState, AFInfo, m, k1, ErrStat2, ErrMsg2 )
          CALL SetErrStat(ErrStat2,ErrMsg2,ErrStat,ErrMsg,RoutineName)
@@ -3117,8 +3115,7 @@ SUBROUTINE UA_AB4( i, j, t, n, u, utimes, p, x, OtherState, AFInfo, m, ErrStat, 
          CALL SetErrStat(ErrStat2,ErrMsg2,ErrStat,ErrMsg,RoutineName)
          IF ( ErrStat >= AbortErrLev ) RETURN
          
-      x_tmp     = x%element(i,j)
-      
+      x_tmp     = x%element(i,j)      
       CALL UA_CalcContStateDeriv( i, j, t, u_interp, p, x_tmp, OtherState, AFInfo, m, xdot, ErrStat2, ErrMsg2 )
          CALL SetErrStat(ErrStat2,ErrMsg2,ErrStat,ErrMsg,RoutineName)
          IF ( ErrStat >= AbortErrLev ) RETURN
@@ -3192,17 +3189,14 @@ SUBROUTINE UA_ABM4( i, j, t, n, u, utimes, p, x, OtherState, AFInfo, m, ErrStat,
       ErrMsg  = "" 
 
       ! save copy of x(t):
-      x_in     = x%element(i,j)
-      
+      x_in     = x%element(i,j)    
          ! predict: (note that we are overwriting x%element(i,j) here):
       CALL UA_AB4( i, j, t, n, u, utimes, p, x, OtherState, AFInfo, m, ErrStat2, ErrMsg2 )
          CALL SetErrStat(ErrStat2,ErrMsg2,ErrStat,ErrMsg,RoutineName)
          IF ( ErrStat >= AbortErrLev ) RETURN
-
       if (n > 2_IntKi) then
          
-            ! correct:
-         
+            ! correct:        
          CALL UA_Input_ExtrapInterp(u, utimes, u_interp, t + p%dt, ErrStat2, ErrMsg2) ! don't need to fix inputs after this call because UA_CalcContStateDeriv() calls that routine
             CALL SetErrStat(ErrStat2,ErrMsg2,ErrStat,ErrMsg,RoutineName)
             IF ( ErrStat >= AbortErrLev ) RETURN
@@ -3210,12 +3204,10 @@ SUBROUTINE UA_ABM4( i, j, t, n, u, utimes, p, x, OtherState, AFInfo, m, ErrStat,
          CALL UA_CalcContStateDeriv( i, j, t + p%dt, u_interp, p, x%element(i,j), OtherState, AFInfo, m, xdot_pred, ErrStat2, ErrMsg2 )
             CALL SetErrStat(ErrStat2,ErrMsg2,ErrStat,ErrMsg,RoutineName)
             IF ( ErrStat >= AbortErrLev ) RETURN
-
          
          x%element(i,j)%x = x_in%x     + p%DT/24.0_R8Ki * ( 9.0_R8Ki * xdot_pred%x     + 19.0_R8Ki * OtherState%xdot(1)%element(i,j)%x &
                                                                                        -  5.0_R8Ki * OtherState%xdot(2)%element(i,j)%x &
                                                                                        +  1.0_R8Ki * OtherState%xdot(3)%element(i,j)%x )
-
       endif
       
 END SUBROUTINE UA_ABM4
@@ -3333,6 +3325,7 @@ SUBROUTINE UA_BDF2( i, j, t, n, u_interp, p, x, OtherState, AFInfo, m, ErrStat, 
       ! Solve for delta x: JMat * x_delta = - F = - ( x(t+dt)  - x(t) - dt * X(t+dt)
       !  using the LAPACK routine 
       !-------------------------------------------------------------------------------------------------
+	  
       CALL UA_CalcContStateDeriv( i, j, t, u_interp, p, x%element(i,j), OtherState, AFInfo, m, xdot_pred, ErrStat=ErrStat2, ErrMsg=ErrMsg2 )
          CALL SetErrStat( ErrStat2, ErrMsg2, ErrStat, ErrMsg, RoutineName  )
          IF ( ErrStat >= AbortErrLev ) RETURN
@@ -3409,18 +3402,18 @@ SUBROUTINE UA_Jacobian( i, j, t, n, u_interp, p, x, OtherState, AFInfo, m, Beta,
    ErrStat = ErrID_None
    ErrMsg  = "" 
 
-
    ! compute JMat = I - dt*dXdx
    
    call eye(JMat, ErrStat, ErrMsg)
    
    x_tmp%x = x%element(i,j)%x
    do k=1,size(p%dx)
-      x_tmp%x(k) = x%element(i,j)%x(k) + p%dx(k)
+      x_tmp%x(k) = x%element(i,j)%x(k) + p%dx(k)  
       CALL UA_CalcContStateDeriv( i, j, t, u_interp, p, x_tmp, OtherState, AFInfo, m, X_p, ErrStat, ErrMsg )
       if (ErrStat >= AbortErrLev) return
 
       x_tmp%x(k) = x%element(i,j)%x(k) - p%dx(k)
+	  
       CALL UA_CalcContStateDeriv( i, j, t, u_interp, p, x_tmp, OtherState, AFInfo, m, X_m, ErrStat, ErrMsg )
       if (ErrStat >= AbortErrLev) return
       
@@ -3501,6 +3494,7 @@ subroutine UA_CalcOutput( i, j, t, u_in, p, x, xd, OtherState, AFInfo, y, misc, 
    real(ReKi)                                   :: gammaD
    real(ReKi)                                   :: TransA
    real(ReKi)                                   :: TuOmega
+   integer(IntKi)                                   :: RotCor
 
    type(AFI_OutputType)                         :: AFI_interp
    type(AFI_OutputType)                         :: AFI_interpE
@@ -3542,7 +3536,6 @@ subroutine UA_CalcOutput( i, j, t, u_in, p, x, xd, OtherState, AFInfo, y, misc, 
    else if (  p%UA_off_forGood(i,j) .or. (OtherState%FirstPass(i, j) .and. p%UAMod < UA_HGM) ) then ! note: if u%U isn't zero because we've called UA_fixInputs
         
       misc%weight(i,j) = 0.0
-      
       call AFI_ComputeAirfoilCoefs( u%alpha, u%Re, u%UserProp, AFInfo, AFI_interp, ErrStat2, ErrMsg2 )
          call SetErrStat(ErrStat2, ErrMsg2, ErrStat, ErrMsg, RoutineName)   
       y%Cl = AFI_interp%Cl
@@ -3599,7 +3592,6 @@ subroutine UA_CalcOutput( i, j, t, u_in, p, x, xd, OtherState, AFInfo, y, misc, 
          call HGM_Steady( i, j, u, p, x_in, AFInfo, ErrStat2, ErrMsg2 )
          call SetErrStat(ErrStat2,ErrMsg2,ErrStat,ErrMsg,RoutineName)
       end if
-      
       call AFI_ComputeUACoefs( AFInfo, u%Re, u%UserProp, BL_p, ErrMsg2, ErrStat2 )
          call SetErrStat(ErrStat2,ErrMsg2,ErrStat,ErrMsg,RoutineName)
          if (ErrStat >= AbortErrLev) return
@@ -3607,7 +3599,6 @@ subroutine UA_CalcOutput( i, j, t, u_in, p, x, xd, OtherState, AFInfo, y, misc, 
       call Get_HGM_constants(i, j, p, u, x_in, BL_p, Tu, alpha_34, alphaE) ! compute Tu, alpha_34, and alphaE
       TuOmega = Tu * u%omega
       TuOmega = MIN( MAX(TuOmega, -MaxTuOmega), MaxTuOmega)
-      
       call AFI_ComputeAirfoilCoefs( alphaE,   u%Re, u%UserProp, AFInfo, AFI_interpE, ErrStat2, ErrMsg2 )
          call SetErrStat(ErrStat2, ErrMsg2, ErrStat, ErrMsg, RoutineName)
 
@@ -3617,13 +3608,12 @@ subroutine UA_CalcOutput( i, j, t, u_in, p, x, xd, OtherState, AFInfo, y, misc, 
          ! calculate values for output:
       cl_fs = AFI_interpE%FullySeparate
       cl_fa = AFI_interpE%FullyAttached
-      fs_aE = AFI_interpE%f_st
+      fs_aE = AFI_interpE%f_st	  
 
       if (p%UAMod == UA_OYE) then
          ! calculate fully attached value:
          call AddOrSub2Pi(BL_p%alpha0, alphaE)
          cl_fa = (alphaE - BL_p%alpha0) * BL_p%c_lalpha ! Cl fully attached
-         
          y%Cl = x4 * cl_fa  + (1.0_ReKi - x4) * cl_fs   ! TODO consider adding simple corrections + pi * Tu * u%omega
          y%Cd = AFI_interpE%Cd                          ! TODO consider adding simple corrections 
          if (AFInfo%ColCm == 0) then ! we don't have a cm column, so make everything 0
@@ -3632,8 +3622,7 @@ subroutine UA_CalcOutput( i, j, t, u_in, p, x, xd, OtherState, AFInfo, y, misc, 
             y%Cm = AFI_interpE%Cm                        ! TODO consider adding simple corrections + y%Cl * delta_c_mf_primeprime - piBy2 * Tu * u%omega  
          endif
          y%Cn = y%Cl*CosAlpha + y%Cd*SinAlpha
-         y%Cc = y%Cl*SinAlpha - y%Cd*CosAlpha
-      
+         y%Cc = y%Cl*SinAlpha - y%Cd*CosAlpha   
       elseif (p%UAMod == UA_HGMV360) then
       
          y%Cn = x4 * AFI_interpE%FullyAttached  + (1.0_ReKi - x4) * AFI_interpE%FullySeparate  + pi * TuOmega
@@ -3711,10 +3700,12 @@ subroutine UA_CalcOutput( i, j, t, u_in, p, x, xd, OtherState, AFInfo, y, misc, 
       end if
       
          ! now check if we should have turned off UA, and modify outputs accordingly (with linear combination of steady outputs)
+	  
       call UA_BlendSteady(u, p, AFInfo, y, misc%FirstWarn_UA_off, misc%weight(i,j), ErrStat2, ErrMsg2)
          call SetErrStat(ErrStat2, ErrMsg2, ErrStat, ErrMsg, RoutineName)
          
    elseif (p%UAMod == UA_Baseline .or. p%UAMod == UA_Gonzalez .or. p%UAMod == UA_MinnemaPierce) then
+      
       ! --- CalcOutput Beddoes-Leishman type models
       
       M           = u%U / p%a_s
@@ -3793,7 +3784,7 @@ subroutine UA_CalcOutput( i, j, t, u_in, p, x, xd, OtherState, AFInfo, y, misc, 
             
       y%Cl = y%Cn*CosAlpha + y%Cc*SinAlpha                                                                                                 ! Eqn 1.2a
       y%Cd = y%Cn*SinAlpha - y%Cc*CosAlpha + BL_p%Cd0                                                                                      ! Eqn 1.2b 
-
+	  
          ! Make Cn and CC consistent with the added contribution of Cd0 in Cd:
       y%Cn = y%Cl*CosAlpha + y%Cd*SinAlpha    !Added the contribution of Cd0 in Cn and Cc
       y%Cc = y%Cl*SinAlpha - y%Cd*CosAlpha
@@ -3840,7 +3831,6 @@ subroutine UA_CalcOutput( i, j, t, u_in, p, x, xd, OtherState, AFInfo, y, misc, 
       
                ! Look up Cm using alpha_prime_f
             alpha_prime_f = KC%alpha_f - KC%Dalphaf                                                                                                ! Eqn 1.43a
-
             call AFI_ComputeAirfoilCoefs( alpha_prime_f, u%Re, u%UserProp, AFInfo, AFI_interp, ErrStat2, ErrMsg2)
                call SetErrStat(ErrStat2,ErrMsg2,ErrStat,ErrMsg,RoutineName)            
             Cm_FS = AFI_interp%Cm + Cm_common                                                                                                      ! Eqn 1.44
@@ -3872,7 +3862,7 @@ subroutine UA_CalcOutput( i, j, t, u_in, p, x, xd, OtherState, AFInfo, y, misc, 
          call CalcWriteOutputs()
       endif
    endif
-   
+
 contains 
 
    subroutine CalcWriteOutputs()
@@ -4204,7 +4194,6 @@ subroutine UA_BlendSteady(u, p, AFInfo, y, FirstWarn_UA_off, weight, ErrStat, Er
       ! calculate the steady coefficients
       call AFI_ComputeAirfoilCoefs( u%alpha, u%Re, u%UserProp, AFInfo, AFI_steady, ErrStat2, ErrMsg2 )
          call SetErrStat(ErrStat2, ErrMsg2, ErrStat, ErrMsg, RoutineName)
-      
       AFI_steady_Cn = AFI_steady%Cl*cos(u%alpha) + (AFI_steady%Cd-AFI_steady%Cd0)*sin(u%alpha)
       AFI_steady_Cc = AFI_steady%Cl*sin(u%alpha) - (AFI_steady%Cd-AFI_steady%Cd0)*cos(u%alpha)
          
