@@ -36,7 +36,7 @@ module BEMT
    
    private
    
-   type(ProgDesc), parameter  :: BEMT_Ver = ProgDesc( 'BEM', '', '' )
+   type(ProgDesc), parameter  :: BEMT_Ver = ProgDesc( 'BEM', '', '' ) 
    character(*),   parameter  :: BEMT_Nickname = 'BEM'
       
    
@@ -868,7 +868,7 @@ subroutine BEMT_UpdateStates( t, n, u, utimes, p, x, xd, z, OtherState, AFInfo, 
    type(BEMT_OtherStateType),           intent(inout) :: OtherState ! Input: Other states at t;
                                                                     !   Output: Other states at t + Interval
    type(BEMT_MiscVarType),              intent(inout) :: m          ! Misc/optimization variables
-   type(AFI_ParameterType),             intent(in   ) :: AFInfo(:)  ! The airfoil parameter data
+   type(AFI_ParameterType),             intent(inout) :: AFInfo(:)  ! The airfoil parameter data
    integer(IntKi),                      intent(  out) :: errStat    ! Error status of the operation
    character(*),                        intent(  out) :: errMsg     ! Error message if ErrStat /= ErrID_None
 
@@ -885,7 +885,7 @@ subroutine BEMT_UpdateStates( t, n, u, utimes, p, x, xd, z, OtherState, AFInfo, 
    
    ErrStat = ErrID_None
    ErrMsg = ""
-   
+
    !...............................................................................................................................
    ! if we haven't initialized z%phi, we want to get a better guess as to what the actual values of phi at t are:
    !...............................................................................................................................
@@ -921,7 +921,7 @@ subroutine BEMT_UpdateStates( t, n, u, utimes, p, x, xd, z, OtherState, AFInfo, 
    
    !...............................................................................................................................
    !  compute inputs to DBEMT at step n+1 (also setting inductions--WITHOUT DBEMT or skewed wake corrections--at step n+1)
-   !...............................................................................................................................
+   !...............................................................................................................................    
    call BEMT_CalcOutput_Inductions( TimeIndex_t_plus_dt, t, .true., .false., z%phi, u(TimeIndex_t_plus_dt), p, x, xd, z, OtherState, AFInfo, m%axInduction, m%tanInduction, m%chi, m, errStat2, errMsg2 )
       call SetErrStat(ErrStat2,ErrMsg2,ErrStat,ErrMsg,RoutineName)
       if (ErrStat >= AbortErrLev) return
@@ -974,17 +974,16 @@ subroutine BEMT_UpdateStates( t, n, u, utimes, p, x, xd, z, OtherState, AFInfo, 
    
       !...............................................................................................................................
       !  compute UA states at t+dt
-      !...............................................................................................................................
+      !...............................................................................................................................  
       do j = 1,p%numBlades
          do i = 1,p%numBladeNodes
-
+		    call BEMT_calcSnel(AFInfo(p%AFindx(i,j)), p, u(2), i, j) ! u(2) is time t+dt
                ! COMPUTE: x%UA and/or xd%UA, OtherState%UA
             call UA_UpdateStates( i, j, t, n, m%u_UA(i,j,:), uTimes, p%UA, x%UA, xd%UA, OtherState%UA, AFInfo(p%AFIndx(i,j)), m%UA, errStat2, errMsg2 )
                if (ErrStat2 /= ErrID_None) then
                   call SetErrStat(ErrStat2,ErrMsg2,ErrStat,ErrMsg,RoutineName//trim(NodeText(i,j)))
                   if (errStat >= AbortErrLev) return
-               end if
-
+               end if	
          end do
       end do
 
@@ -1052,7 +1051,7 @@ subroutine UpdatePhi( u, p, phi, AFInfo, m, ValidPhi, errStat, errMsg )
    real(ReKi),                          intent(inout) :: phi(:,:) 
    type(BEMT_MiscVarType),              intent(inout) :: m              ! Misc/optimization variables
    logical,                             intent(inout) :: ValidPhi(:,:)  ! if this is a valid BEM solution of phi
-   type(AFI_ParameterType),             intent(in   ) :: AFInfo(:)      ! The airfoil parameter data
+   type(AFI_ParameterType),             intent(inout) :: AFInfo(:)      ! The airfoil parameter data
    integer(IntKi),                      intent(  out) :: errStat        ! Error status of the operation
    character(*),                        intent(  out) :: errMsg         ! Error message if ErrStat /= ErrID_None
 
@@ -1076,7 +1075,7 @@ subroutine UpdatePhi( u, p, phi, AFInfo, m, ValidPhi, errStat, errMsg )
          
          do j = 1,p%numBlades ! Loop through all blades
             do i = 1,p%numBladeNodes ! Loop through the blade nodes / elements
-               
+               call BEMT_calcSnel(AFInfo(p%AFindx(i,j)), p, u, i, j)
                call BEMT_UnCoupledSolve(p, u, i, j, phi(i,j), AFInfo(p%AFIndx(i,j)), &
                                         ValidPhi(i,j), m%FirstWarn_Phi,errStat2, errMsg2)
 
@@ -1129,7 +1128,7 @@ subroutine calculate_Inductions_from_BEMT(p,phi,u,OtherState,AFInfo,axInduction,
    real(ReKi),                      intent(in   ) :: phi(:,:)           !< phi
    type(BEMT_InputType),            intent(in   ) :: u                  !< Inputs at t
    type(BEMT_OtherStateType),       intent(in   ) :: OtherState         !< Other/logical states at t
-   type(AFI_ParameterType),         intent(in   ) :: AFInfo(:)          !< The airfoil parameter data
+   type(AFI_ParameterType),         intent(inout) :: AFInfo(:)          !< The airfoil parameter data
    real(ReKi),                      intent(inout) :: axInduction(:,:)   !< axial induction
    real(ReKi),                      intent(inout) :: tanInduction(:,:)  !< tangential induction
    integer(IntKi),                  intent(  out) :: errStat            !< Error status of the operation
@@ -1159,6 +1158,7 @@ subroutine calculate_Inductions_from_BEMT(p,phi,u,OtherState,AFInfo,axInduction,
       
             ! Need to get the induction factors for these conditions without skewed wake correction and without UA
             ! COMPUTE: axInduction, tanInduction  
+		    call BEMT_calcSnel(AFInfo(p%AFindx(i,j)), p, u, i, j)
             fzero = BEMTU_InductionWithResidual(p, u, i, j, phi(i,j), AFInfo(p%AFIndx(i,j)), IsValidSolution, ErrStat2, ErrMsg2, a=axInduction(i,j), ap=tanInduction(i,j), kp_out=kp, k_out=k, F_out=F)
             if (present(kp_out)) kp_out(i,j) = kp
             if (present(k_out))  k_out(i,j)  = k
@@ -1302,7 +1302,7 @@ subroutine BEMT_CalcOutput( t, u, p, x, xd, z, OtherState, AFInfo, y, m, errStat
          ! Initialize some output values
    errStat = ErrID_None
    errMsg  = ""
-
+   
 !!#ifdef DEBUG_BEMT_RESIDUAL
 !!   call WriteDEBUGValuesToFile(t, u, p, x, xd, z, OtherState, m, AFInfo)
 !!#endif
@@ -1312,7 +1312,7 @@ subroutine BEMT_CalcOutput( t, u, p, x, xd, z, OtherState, AFInfo, y, m, errStat
    
    !...............................................................................................................................
    ! if we haven't initialized z%phi, we want to get a better guess as to what the actual values of phi are:
-   !...............................................................................................................................
+   !............................................................................................................................... 
    if (.not. OtherState%nodesInitialized) then
       call UpdatePhi( u, p, y%phi, AFInfo, m, m%ValidPhi, errStat2, errMsg2 )
    end if
@@ -1342,37 +1342,35 @@ subroutine BEMT_CalcOutput( t, u, p, x, xd, z, OtherState, AFInfo, y, m, errStat
          
       enddo             ! I - Blade nodes / elements
    enddo          ! J - All blades
-   
+
       ! Now depending on the option for UA get the airfoil coefs, Cl, Cd, Cm for unsteady or steady implementation
    if (p%UA_Flag ) then
 
       do j = 1,p%numBlades ! Loop through all blades
-         do i = 1,p%numBladeNodes ! Loop through the blade nodes / elements
-
-		    call BEMT_assembleRotCorParams(AFInfo(p%AFindx(i,j))%RotCorParams, y, p, u, i, j)
-            call UA_CalcOutput(i, j, t, m%u_UA(i,j,InputIndex), p%UA, x%UA, xd%UA, OtherState%UA, AFInfo(p%AFindx(i,j)), m%y_UA, m%UA, errStat2, errMsg2)
-               if (ErrStat2 /= ErrID_None) then
-                  call SetErrStat(ErrStat2,ErrMsg2,ErrStat,ErrMsg,RoutineName//trim(NodeText(i,j)))
-                  if (errStat >= AbortErrLev) return
-               end if
-               
+         do i = 1,p%numBladeNodes ! Loop through the blade nodes / elements		 
+         call BEMT_calcSnel(AFInfo(p%AFindx(i,j)), p, u, i, j)
+		 call UA_CalcOutput(i, j, t, m%u_UA(i,j,InputIndex), p%UA, x%UA, xd%UA, OtherState%UA, AFInfo(p%AFindx(i,j)), m%y_UA, m%UA, errStat2, errMsg2)
+         if (ErrStat2 /= ErrID_None) then
+            call SetErrStat(ErrStat2,ErrMsg2,ErrStat,ErrMsg,RoutineName//trim(NodeText(i,j)))
+            if (errStat >= AbortErrLev) return
+         end if		   
+			   
             y%Cl(i,j) = m%y_UA%Cl
             y%Cd(i,j) = m%y_UA%Cd
             y%Cm(i,j) = m%y_UA%Cm
             y%Cpmin(i,j) = 0.0_ReKi !bjj: this isn't set anywhere... ???? 
+
          enddo             ! I - Blade nodes / elements
       enddo          ! J - All blades
    
       ! if ( mod(REAL(t,ReKi),.1) < p%dt) then
          call UA_WriteOutputToFile(t, p%UA, m%y_UA)
       ! end if
-      
    else
             ! compute steady Airfoil Coefs
       do j = 1,p%numBlades ! Loop through all blades
          do i = 1,p%numBladeNodes ! Loop through the blade nodes / elements
-
-			call BEMT_assembleRotCorParams(AFInfo(p%AFindx(i,j))%RotCorParams, y, p, u, i, j)
+		    call BEMT_calcSnel(AFInfo(p%AFindx(i,j)), p, u, i, j)
 			call AFI_ComputeAirfoilCoefs( y%AOA(i,j), y%Re(i,j), u%UserProp(i,j), AFInfo(p%AFindx(i,j)), AFI_interp, errStat2, errMsg2)		
 			
             if (ErrStat2 /= ErrID_None) then
@@ -1382,14 +1380,12 @@ subroutine BEMT_CalcOutput( t, u, p, x, xd, z, OtherState, AFInfo, y, m, errStat
             y%Cl(i,j) = AFI_interp%Cl
             y%Cd(i,j) = AFI_interp%Cd
             y%Cm(i,j) = AFI_interp%Cm
-            y%Cpmin(i,j) = AFI_interp%Cpmin
+            y%Cpmin(i,j) = AFI_interp%Cpmin		
          
          enddo             ! I - Blade nodes / elements
       enddo          ! J - All blades
       
    end if
-
-
    !............................................
    ! Compute Cx, Cy given Cl, Cd and phi
    !............................................
@@ -1415,38 +1411,6 @@ subroutine BEMT_CalcOutput( t, u, p, x, xd, z, OtherState, AFInfo, y, m, errStat
 
 end subroutine BEMT_CalcOutput
 !----------------------------------------------------------------------------------------------------------------------------------
-subroutine BEMT_assembleRotCorParams(RotCorParams, y, p, u, i, j)
-    ! @param RotCorParams: The output structure containing all assembled parameters.
-    ! @param y: The AeroDyn output structure.
-    ! @param p: The AeroDyn parameter structure.
-    ! @param u: The AeroDyn input structure.
-    ! @param i: The index for the blade node.
-    ! @param j: The index for the blade.
-
-    implicit none
-    
-    ! Variable declarations
-    type(RotCorr_InputType), intent(inout) :: RotCorParams
-    type(BEMT_OutputType),          intent(inout)  :: y           ! Outputs computed at t
-    type(BEMT_ParameterType),       intent(in   )  :: p           ! Parameters
-    type(BEMT_InputType),           intent(in   )  :: u           ! Inputs at Time t
-    integer(IntKi),          intent(in)  :: i, j
-    
-    ! Assemble the parameters into the RotCorParams structure
-    !RotCorParams%RotCor already assigned
-    RotCorParams%tsr            = abs(u%TSR)
-    RotCorParams%AOA            = y%AOA(i,j)
-    RotCorParams%rLocal         = u%rLocal(i,j)
-    RotCorParams%rMax           = p%rTipFixMax
-    RotCorParams%chord          = p%chord(i,j)
-
-    ! Calculate normalized ratios with a safe divide to avoid division by zero.
-    ! merge(x,y,condition) returns x if condition is true, y otherwise.
-    RotCorParams%r_over_R     = merge(RotCorParams%rLocal/RotCorParams%rMax, 0.0_ReKi, RotCorParams%rMax > tiny(1.0_ReKi))
-    RotCorParams%chord_over_r = merge(RotCorParams%chord/RotCorParams%rLocal, 0.0_ReKi, RotCorParams%rLocal > tiny(1.0_ReKi))
-	
-end subroutine BEMT_assembleRotCorParams
-!----------------------------------------------------------------------------------------------------------------------------------
 !> Routine used in linearization to get the states initialized properly at t=0 (before perturbing things)
 subroutine BEMT_InitStates(t, u, p, x, xd, z, OtherState, m, AFInfo, ErrStat, ErrMsg )
    REAL(DbKi),                     intent(in   )  :: t           ! current simulation time
@@ -1457,7 +1421,7 @@ subroutine BEMT_InitStates(t, u, p, x, xd, z, OtherState, m, AFInfo, ErrStat, Er
    type(BEMT_ConstraintStateType), intent(in   )  :: z           ! Constraint states at t
    type(BEMT_OtherStateType),      intent(inout)  :: OtherState  ! Other states at t
    type(BEMT_MiscVarType),         intent(inout)  :: m           ! Misc/optimization variables
-   type(AFI_ParameterType),        intent(in   )  :: AFInfo(:)   ! The airfoil parameter data
+   type(AFI_ParameterType),        intent(inout)  :: AFInfo(:)   ! The airfoil parameter data
    integer(IntKi),                 intent(  out)  :: errStat     ! Error status of the operation
    character(*),                   intent(  out)  :: errMsg      ! Error message if ErrStat /= ErrID_None
 
@@ -1506,7 +1470,7 @@ subroutine BEMT_CalcOutput_Inductions( InputIndex, t, CalculateDBEMTInputs, Appl
    type(BEMT_ConstraintStateType), intent(in   )  :: z           ! Constraint states at t
    type(BEMT_OtherStateType),      intent(in   )  :: OtherState  ! Other states at t
    type(BEMT_MiscVarType),         intent(inout)  :: m           ! Misc/optimization variables
-   type(AFI_ParameterType),        intent(in   )  :: AFInfo(:)   ! The airfoil parameter data
+   type(AFI_ParameterType),        intent(inout)  :: AFInfo(:)   ! The airfoil parameter data
    REAL(ReKi),                     intent(inout)  :: axInduction(:,:)
    REAL(ReKi),                     intent(inout)  :: tanInduction(:,:)
    REAL(ReKi),                     intent(inout)  :: chi(:,:)    ! value used in skewed wake correction
@@ -1725,7 +1689,7 @@ subroutine BEMT_CalcContStateDeriv( t, u, p, x, xd, z, OtherState, m, dxdt, AFIn
    TYPE(BEMT_OtherStateType),      INTENT(IN   )  :: OtherState  ! Other states at t
    TYPE(BEMT_MiscVarType),         INTENT(INOUT)  :: m           ! Misc/optimization variables
    TYPE(BEMT_ContinuousStateType), INTENT(INOUT)  :: dxdt        ! Continuous state derivatives at t
-   TYPE(AFI_ParameterType),        INTENT(IN   )  :: AFInfo(:)   ! The airfoil parameter data
+   TYPE(AFI_ParameterType),        INTENT(INOUT)  :: AFInfo(:)   ! The airfoil parameter data
    INTEGER(IntKi),                 INTENT(  OUT)  :: ErrStat     ! Error status of the operation
    CHARACTER(*),                   INTENT(  OUT)  :: ErrMsg      ! Error message if ErrStat /= ErrID_None
 
@@ -1798,6 +1762,7 @@ subroutine BEMT_CalcContStateDeriv( t, u, p, x, xd, z, OtherState, m, dxdt, AFIn
       
       do j = 1,p%numBlades
          do i = 1,p%numBladeNodes
+		    call BEMT_calcSnel(AFInfo(p%AFindx(i,j)), p, u, i, j)
             call UA_CalcContStateDeriv( i, j, t, m%u_UA(i,j,InputIndex), p%UA, x%UA%element(i,j), OtherState%UA, AFInfo(p%AFIndx(i,j)), m%UA, dxdt%UA%element(i,j), ErrStat2, ErrMsg2 )
          end do
       end do
@@ -1850,7 +1815,7 @@ subroutine BEMT_CalcConstrStateResidual( Time, u, p, x, xd, z, OtherState, m, z_
    type(BEMT_MiscVarType),         intent(inout)  :: m           ! Misc/optimization variables
    type(BEMT_ConstraintStateType), intent(inout)  :: z_residual  ! Residual of the constraint state equations using
                                                                  !     the input values described above
-   type(AFI_ParameterType),        intent(in   )  :: AFInfo(:)   ! The airfoil parameter data
+   type(AFI_ParameterType),        intent(inout)  :: AFInfo(:)   ! The airfoil parameter data
    integer(IntKi),                 intent(  out)  :: ErrStat     ! Error status of the operation
    character(*),                   intent(  out)  :: ErrMsg      ! Error message if ErrStat /= ErrID_None
 
@@ -1885,6 +1850,7 @@ subroutine BEMT_CalcConstrStateResidual( Time, u, p, x, xd, z, OtherState, m, z_
             do i = 1,p%numBladeNodes
          
                   ! Solve for the constraint states here:
+			   call BEMT_calcSnel(AFInfo(p%AFindx(i,j)), p, u, i, j)
                Z_residual%phi(i,j) = BEMTU_InductionWithResidual(p, u, i, j, z%phi(i,j), AFInfo(p%AFindx(i,j)), IsValidSolution, ErrStat2, ErrMsg2)
                call SetErrStat(ErrStat2,ErrMsg2,ErrStat,ErrMsg,RoutineName)
                if (ErrStat >= AbortErrLev) return                  
@@ -2166,7 +2132,7 @@ integer function FindTestRegion(p, u, iBladeNode, jBlade, phiLower, phiUpper, AF
    real(ReKi),             intent(inout) :: phiLower !intent "out" in case the previous solution can alter the test region bounds
    real(ReKi),             intent(inout) :: phiUpper !intent "out" in case the previous solution can alter the test region bounds
    !integer,                intent(in   ) :: numBladeNodes
-   type(AFI_ParameterType),intent(in   ) :: AFInfo
+   type(AFI_ParameterType),intent(inout) :: AFInfo
    logical,                intent(in   ) :: phiIn_IsValidSolution
    real(ReKi),             intent(in   ) :: phiIn
    real(ReKi),             intent(in   ) :: f_phiIn
@@ -2250,7 +2216,7 @@ subroutine BEMT_UnCoupledSolve(p, u, iBladeNode, jBlade, phi, AFInfo, ValidPhi, 
    integer(IntKi),          intent(in  ) :: iBladeNode         !< index for blade node
    integer(IntKi),          intent(in  ) :: jBlade             !< index for blade
    real(ReKi),             intent(inout) :: phi
-   TYPE(AFI_ParameterType),INTENT(IN   ) :: AFInfo
+   TYPE(AFI_ParameterType),INTENT(INOUT) :: AFInfo
    logical,                intent(inout) :: ValidPhi
    logical,                intent(inout) :: FirstWarn
    integer(IntKi),         intent(  out) :: errStat       ! Error status of the operation

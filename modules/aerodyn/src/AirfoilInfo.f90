@@ -39,6 +39,7 @@ MODULE AirfoilInfo
    PUBLIC                                       :: AFI_WrHeader
    PUBLIC                                       :: AFI_WrData
    PUBLIC                                       :: AFI_WrTables
+   PUBLIC                                       :: AFI_CalcSnel
 
    TYPE(ProgDesc), PARAMETER                    :: AFI_Ver = ProgDesc( 'AirfoilInfo', '', '')    ! The name, version, and date of AirfoilInfo.
 
@@ -106,7 +107,6 @@ CONTAINS
 
       !CALL DispNVD ( AFI_Ver )
       p%FileName = InitInput%FileName ! store this for error messages later (e.g., in UA)
-
       
       CALL AFI_ValidateInitInput(InitInput, ErrStat2, ErrMsg2)
          call SetErrStat(ErrStat2,ErrMsg2,ErrStat,ErrMsg,RoutineName)
@@ -120,8 +120,9 @@ CONTAINS
              
          ! Set the lookup model:  1 = 1D, 2 = 2D based on (AoA,Re), 3 = 2D based on (AoA,UserProp)
       p%AFTabMod   = InitInput%AFTabMod
-         ! Set the rotor correction params (only the switch RotCor is really necessary here but it is contained in RotCorParams)
-      p%RotCorParams   = InitInput%RotCorParams	  
+         ! Set the rotor correction params 
+      p%RotCorParams   = InitInput%RotCorParams
+	  p%RotCorParams%UAMod   = InitInput%UAMod
       
          ! Set the column indices for the various airfoil coefficients as they will be stored in our data structures, 
          !   NOT as they are recorded in the airfoil input file (InitInput%InCol_*) !
@@ -278,7 +279,7 @@ CONTAINS
          if ( p%InterpOrd == 3_IntKi ) then
                
             ! bjj: what happens at the end points (these are periodic, so we should maybe extend the tables to make sure the end point?) 
-
+ 
                ! use this for cubic splines:
             call CubicSplineInitM ( p%Table(iTable)%Alpha &
                                     , p%Table(iTable)%Coefs &
@@ -796,8 +797,13 @@ ALPHA_LOOP: DO Row=1,p%Table(iTable)%NumAlf-1
                   'Airfoil data should go from -180 degrees to 180 degrees and the coefficients at the ends should be the same.', ErrStat, ErrMsg, RoutineName )
             ENDIF
          end if
+		 
+         ! Pre-calculate Snel rotationally corrected tables as a function of snel correction factor, in case Snel correction active
+		 if (p%RotCorParams%RotCor>0) then
+            call AFI_PrecalculateSnelTables(p, iTable, InitInp, ErrStat, ErrMsg, RoutineName)
+		 end if
+		 
       ENDDO ! iTable
-
 
       DO iTable=1,p%NumTabs
          if ( .not. p%Table(iTable)%InclUAdata )  then
@@ -826,6 +832,146 @@ ALPHA_LOOP: DO Row=1,p%Table(iTable)%NumAlf-1
 
 
    END SUBROUTINE ReadAFfile
+!----------------------------------------------------------------------------------------------------------------------------------     
+SUBROUTINE AFI_PrecalculateSnelTables(p, iTable, InitInp, ErrStat, ErrMsg, RoutineName)
+    ! Description:
+    ! This subroutine pre-calculates the Snel-corrected airfoil tables for all
+    ! Snel factors and stores them in the snelTables component of the
+    ! derived type. This helps avoid runtime calculations when the Snel effect is active.
+    
+    ! Arguments:
+    IMPLICIT NONE
+    
+	TYPE (AFI_ParameterType), INTENT(INOUT)   :: p            ! This structure stores all the module parameters that are set by AirfoilInfo during the initialization phase.
+    INTEGER(IntKi),          INTENT(IN)       :: iTable       ! Index of the table to process
+    TYPE (AFI_InitInputType), INTENT(IN)      :: InitInp                       ! This structure stores values that are set by the calling routine during the initialization phase.
+    INTEGER(IntKi),          INTENT(OUT)      :: ErrStat      ! Error status flag
+    CHARACTER(*),            INTENT(OUT)      :: ErrMsg       ! Error message string
+    CHARACTER(*),            INTENT(IN)       :: RoutineName  ! Name of the calling routine for error handling
+	TYPE (AFI_UA_BL_Default_Type), ALLOCATABLE :: CalcDefaults(:)            ! Whether to calculate default UA params
+
+    ! Local Variables
+    INTEGER(IntKi)            :: snelIdx      ! Loop index for Snel factors
+    REAL(ReKi)                :: snel_factor  ! The Snel correction factor
+    REAL(ReKi),    ALLOCATABLE:: AOA_vec(:)   ! Local copy of Alpha for interpolation
+    REAL(ReKi),    ALLOCATABLE:: Cl_vec(:)    ! Local copy of Cl for interpolation
+    REAL(ReKi)                :: Cl_0         ! Lift coefficient at zero angle of attack
+	REAL(ReKi)                :: max_snel_factor         ! Maximum snel_factor to tabulate
+	INTEGER(IntKi)            :: num_snel_tables         ! Number of snel tables to create. 
+    INTEGER(IntKi)            :: iLo          ! Lower index for interpolation
+    INTEGER(IntKi)            :: ErrStat2     ! Local error status for splines
+    CHARACTER(300)            :: ErrMsg2      ! Local error message for splines
+    
+    TYPE(AFI_Table_Type)      :: tempSnelTable ! Temporary table for deep copy operations
+
+    ! Initialize error handling
+    ErrStat = ErrID_None
+    ErrMsg  = ""	
+	
+	allocate(CalcDefaults(p%NumTabs))
+	
+    ! --- Main Logic ---
+	
+	max_snel_factor = 1.0_ReKi
+	num_snel_tables = 200
+
+    ! Get table data
+    AOA_vec = p%Table(iTable)%Alpha ! AOAs in radians
+
+    ! The snelTables array must be allocated before it can be used.
+    allocate(p%Table(iTable)%snelTables(num_snel_tables+1))
+    
+    DO snelIdx = 1, num_snel_tables+1 ! Loop over snel factor values
+        ! This formula creates evenly spaced values from 0.0 to max_snel_factor.
+        snel_factor = ( (snelIdx-1.0_ReKi)/(num_snel_tables) ) * max_snel_factor
+        
+        ! Perform a deep copy of the table data to avoid a cumulative error.
+        tempSnelTable = p%Table(iTable) ! Shallow copy of non-allocatable components
+        
+        ! Check if allocatable arrays exist before attempting to allocate and copy.
+        if ( allocated(p%Table(iTable)%Alpha) ) then
+            if (allocated(tempSnelTable%Alpha)) deallocate(tempSnelTable%Alpha)
+            allocate(tempSnelTable%Alpha(size(p%Table(iTable)%Alpha)))
+            tempSnelTable%Alpha = p%Table(iTable)%Alpha
+        end if
+        if ( allocated(p%Table(iTable)%Coefs) ) then
+            if (allocated(tempSnelTable%Coefs)) deallocate(tempSnelTable%Coefs)
+            allocate(tempSnelTable%Coefs(size(p%Table(iTable)%Coefs,1), size(p%Table(iTable)%Coefs,2)))
+            tempSnelTable%Coefs = p%Table(iTable)%Coefs
+        end if
+        
+        if ( p%Table(iTable)%ConstData ) then
+            ! We still need to allocate the destination Coefs array
+            if (allocated(p%Table(iTable)%snelTables(snelIdx)%Coefs)) deallocate(p%Table(iTable)%snelTables(snelIdx)%Coefs)
+            allocate(p%Table(iTable)%snelTables(snelIdx)%Coefs(size(tempSnelTable%Coefs,1), size(tempSnelTable%Coefs,2)))
+            p%Table(iTable)%snelTables(snelIdx)%Coefs(:, p%ColCl) = tempSnelTable%Coefs(:, p%ColCl)
+        else
+            ! The Cl_vec needs to be a local copy to avoid a cumulative error.
+            Cl_vec = tempSnelTable%Coefs(:, p%ColCl)
+            
+            ! Find Cl at alpha=0 using InterpBinReal
+            iLo = 0
+            Cl_0 = InterpBinReal( 0.0_ReKi, tempSnelTable%Alpha, Cl_vec, iLo, size(tempSnelTable%Alpha) )
+            
+            call AFI_ApplySnel(tempSnelTable%Alpha, Cl_vec, snel_factor, Cl_0, tempSnelTable%UA_BL%C_lalpha)
+
+			! Copy the corrected Cl_vec back into the tempSnelTable%Coefs array
+            tempSnelTable%Coefs(:, p%ColCl) = Cl_vec
+			
+            p%Table(iTable)%snelTables(snelIdx)%snel_factor = snel_factor
+            
+            ! Explicitly allocate the allocatable components before assigning to them.
+            if (allocated(p%Table(iTable)%snelTables(snelIdx)%Alpha)) deallocate(p%Table(iTable)%snelTables(snelIdx)%Alpha)
+            allocate(p%Table(iTable)%snelTables(snelIdx)%Alpha(size(tempSnelTable%Alpha)))
+            p%Table(iTable)%snelTables(snelIdx)%Alpha = tempSnelTable%Alpha
+            
+            if (allocated(p%Table(iTable)%snelTables(snelIdx)%Coefs)) deallocate(p%Table(iTable)%snelTables(snelIdx)%Coefs)
+            allocate(p%Table(iTable)%snelTables(snelIdx)%Coefs(size(tempSnelTable%Coefs,1), size(tempSnelTable%Coefs,2)))
+
+            ! Now that the Alpha and Coefs arrays are populated, we can calculate the splines.
+            ! Allocate the arrays to hold spline coefficients.
+	        allocate (tempSnelTable%SplineCoefs( p%Table(iTable)%NumAlf-1, size(p%Table(iTable)%Coefs,2), 0:3 ), STAT=ErrStat2 )	
+            allocate (p%Table(iTable)%snelTables(snelIdx)%SplineCoefs( p%Table(iTable)%NumAlf-1, size(p%Table(iTable)%Coefs,2), 0:3 ), STAT=ErrStat2 )	
+			
+            if (InitInp%UAMod>0) then			
+                ! For UA_Flag, we pass the local temporary table to the function.
+                call CalculateUACoeffs(CalcDefaults(iTable), tempSnelTable, p%ColCl, p%ColCd, p%ColCm, p%ColUAf, InitInp%UAMod)
+            end if
+
+            ! Always calculate splines (whether UA was applied or not)
+            allocate(tempSnelTable%SplineCoefs( p%Table(iTable)%NumAlf-1, size(tempSnelTable%Coefs,2), 0:3 ), STAT=ErrStat2 )	
+            
+            if ( p%InterpOrd == 3_IntKi ) then
+                call CubicSplineInitM(tempSnelTable%Alpha, tempSnelTable%Coefs, tempSnelTable%SplineCoefs, ErrStat2, ErrMsg2)
+                call SetErrStat(ErrStat2, ErrMsg2, ErrStat, ErrMsg, RoutineName)
+            else if ( p%InterpOrd == 1_IntKi ) then
+                call CubicLinSplineInitM(tempSnelTable%Alpha, tempSnelTable%Coefs, tempSnelTable%SplineCoefs, ErrStat2, ErrMsg2)
+                call SetErrStat(ErrStat2, ErrMsg2, ErrStat, ErrMsg, RoutineName)
+            end if
+            
+            ! Now copy everything to the final table
+			p%Table(iTable)%snelTables(snelIdx)%Alpha = tempSnelTable%Alpha
+            p%Table(iTable)%snelTables(snelIdx)%Coefs = tempSnelTable%Coefs			
+			p%Table(iTable)%snelTables(snelIdx)%SplineCoefs = tempSnelTable%SplineCoefs
+            
+            ! Copy all other relevant properties
+            p%Table(iTable)%snelTables(snelIdx)%UserProp = tempSnelTable%UserProp
+            p%Table(iTable)%snelTables(snelIdx)%Re = tempSnelTable%Re
+            p%Table(iTable)%snelTables(snelIdx)%NumAlf = tempSnelTable%NumAlf
+            p%Table(iTable)%snelTables(snelIdx)%ConstData = tempSnelTable%ConstData
+            p%Table(iTable)%snelTables(snelIdx)%InclUAdata = tempSnelTable%InclUAdata
+            p%Table(iTable)%snelTables(snelIdx)%UA_BL = tempSnelTable%UA_BL
+			
+        end if
+    ENDDO ! snelIdx loop
+    ! Deallocate temporary arrays
+    if (allocated(AOA_vec)) deallocate(AOA_vec)
+    if (allocated(Cl_vec)) deallocate(Cl_vec)
+    if (allocated(tempSnelTable%Alpha)) deallocate(tempSnelTable%Alpha)
+    if (allocated(tempSnelTable%Coefs)) deallocate(tempSnelTable%Coefs)
+    if (allocated(tempSnelTable%SplineCoefs)) deallocate(tempSnelTable%SplineCoefs)
+
+END SUBROUTINE AFI_PrecalculateSnelTables   
 !----------------------------------------------------------------------------------------------------------------------------------  
    SUBROUTINE CalculateUACoeffs(CalcDefaults,p,ColCl,ColCd,ColCm,ColUAf,UAMod)
       TYPE (AFI_UA_BL_Default_Type),intent(in):: CalcDefaults
@@ -884,7 +1030,7 @@ ALPHA_LOOP: DO Row=1,p%Table(iTable)%NumAlf-1
       col_fs = ColUAf + 1
       col_fa = col_fs  + 1
       UA_f_cn = UAMod /= UA_HGM .and. UAMod /= UA_Oye ! these models use cl instead of cn
-      
+
       if ( p%InclUAdata )  then
 
             ! these variables are for the unused UAMod=1 (UA_Baseline) model;
@@ -1719,11 +1865,12 @@ subroutine AFI_ComputeAirfoilCoefs1D( AOA, p, AFI_interp, errStat, errMsg, Table
    integer(IntKi),           intent(  out) :: errStat                    ! Error status of the operation
    character(*),             intent(  out) :: errMsg                     ! Error message if ErrStat /= ErrID_None
    integer(IntKi), optional, intent(in   ) :: TableNum
+   type(RotCorr_InputType)                               :: RotCorParams 
    
    
    real                                    :: IntAFCoefs(MaxNumAFCoeffs)                ! The interpolated airfoil coefficients.
    real(reki)                              :: Alpha
-   integer                                 :: s1
+   integer                                 :: s1,iLo,iHi, iMid, AlphaIdx
    integer                                 :: iTab
 
       
@@ -1748,8 +1895,7 @@ subroutine AFI_ComputeAirfoilCoefs1D( AOA, p, AFI_interp, errStat, errMsg, Table
    
    
          ! Spline interpolation of lower table based on requested AOA
-   
-      IntAFCoefs(1:s1) = CubicSplineInterpM( Alpha  &
+   IntAFCoefs(1:s1) = CubicSplineInterpM( Alpha  &
                                              , p%Table(iTab)%Alpha &
                                              , p%Table(iTab)%Coefs &
                                              , p%Table(iTab)%SplineCoefs &
@@ -1758,7 +1904,7 @@ subroutine AFI_ComputeAirfoilCoefs1D( AOA, p, AFI_interp, errStat, errMsg, Table
   
    AFI_interp%Cl    = IntAFCoefs(p%ColCl)
    AFI_interp%Cd    = IntAFCoefs(p%ColCd)
-     
+
    if ( p%ColCm > 0 ) then
       AFI_interp%Cm = IntAFCoefs(p%ColCm)
    else
@@ -1775,6 +1921,7 @@ subroutine AFI_ComputeAirfoilCoefs1D( AOA, p, AFI_interp, errStat, errMsg, Table
       AFI_interp%f_st          = IntAFCoefs(p%ColUAf)   ! separation function
       AFI_interp%fullySeparate = IntAFCoefs(p%ColUAf+1) ! fully separated cn or cl
       AFI_interp%fullyAttached = IntAFCoefs(p%ColUAf+2) ! fully attached cn or cl
+
    else
       AFI_interp%f_st          = 0.0_ReKi
       AFI_interp%fullySeparate = 0.0_ReKi
@@ -1790,10 +1937,9 @@ subroutine AFI_ComputeAirfoilCoefs1D( AOA, p, AFI_interp, errStat, errMsg, Table
       AFI_interp%Cm0 = 0.0_ReKi
    end if
    
-   
 end subroutine AFI_ComputeAirfoilCoefs1D
 !----------------------------------------------------------------------------------------------------------------------------------  
-!> This routine calculates Cl, Cd, Cm, (and Cpmin) for a set of tables which are dependent on AOA as well as a 2nd user-defined varible, could be Re or Cntrl, etc.
+!> This routine calculates Cl, Cd, Cm, (and Cpmin) for a set of tables which are dependent on AOA as well as a 2nd user-defined variable, could be Re or Cntrl, etc.
 subroutine AFI_ComputeAirfoilCoefs( AOA, Re, UserProp, p, AFI_interp, errStat, errMsg)
 
    real(ReKi),                             intent(in   ) :: AOA
@@ -1803,94 +1949,47 @@ subroutine AFI_ComputeAirfoilCoefs( AOA, Re, UserProp, p, AFI_interp, errStat, e
    type(AFI_OutputType),                   intent(  out) :: AFI_interp                 ! contains   real(ReKi),               intent(  out) :: Cl, Cd, Cm, Cpmin
    integer(IntKi),                         intent(  out) :: errStat                    ! Error status of the operation
    character(*),                           intent(  out) :: errMsg                     ! Error message if ErrStat /= ErrID_None 
-   real(ReKi)                              :: ReInterp
-   type(RotCorr_InputType)                               :: RotCorParams  
+   real(ReKi)                              :: ReInterp 
    
       ! These coefs are stored in the p data structures based on Re
-   
-   if ( p%AFTabMod == AFITable_1 ) then 
-      call AFI_ComputeAirfoilCoefs1D( AOA, p, AFI_interp, errStat, errMsg, 1 )
-   elseif ( p%AFTabMod == AFITable_2Re ) then
+   ! Check if rotation correction is enabled
+   if ( p%RotCorParams%RotCor == 1 ) then
+      ! Handle rotation correction interpolation
+      if ( p%AFTabMod == AFITable_1 ) then 
+         call AFI_ComputeAirfoilCoefsRotCor1D( AOA, p, AFI_interp, errStat, errMsg, 1 )
+      elseif ( p%AFTabMod == AFITable_2Re ) then
 #ifndef AFI_USE_LINEAR_RE
-      ReInterp = log( Re )
+         ReInterp = log( Re )
 #else
-      ReInterp =      Re
+         ReInterp =      Re
 #endif
-      call AFI_ComputeAirfoilCoefs2D( AOA, ReInterp, p, AFI_interp, errStat, errMsg )
-   else !if ( p%AFTabMod == AFITable_2User ) then
-      call AFI_ComputeAirfoilCoefs2D( AOA, UserProp, p, AFI_interp, errStat, errMsg )
+         call AFI_ComputeAirfoilCoefsRotCor2D( AOA, ReInterp, p, AFI_interp, errStat, errMsg )
+      else !if ( p%AFTabMod == AFITable_2User ) then
+         call AFI_ComputeAirfoilCoefsRotCor2D( AOA, UserProp, p, AFI_interp, errStat, errMsg )
+      end if
+
+   else
+      ! Original logic without rotation correction
+      if ( p%AFTabMod == AFITable_1 ) then 	     
+         call AFI_ComputeAirfoilCoefs1D( AOA, p, AFI_interp, errStat, errMsg, 1 )
+      elseif ( p%AFTabMod == AFITable_2Re ) then
+#ifndef AFI_USE_LINEAR_RE
+         ReInterp = log( Re )
+#else
+         ReInterp =      Re
+#endif
+         call AFI_ComputeAirfoilCoefs2D( AOA, ReInterp, p, AFI_interp, errStat, errMsg )
+      else !if ( p%AFTabMod == AFITable_2User ) then
+         call AFI_ComputeAirfoilCoefs2D( AOA, UserProp, p, AFI_interp, errStat, errMsg )
+      end if
    end if
    
    ! put some limits on the separation function:
    AFI_interp%f_st = min( max( AFI_interp%f_st, 0.0_ReKi), 1.0_ReKi)  ! separation function
-   
-   ! Apply rotational corrections
-   RotCorParams = p%RotCorParams
-
-   call AFI_ApplyRotCorr( AFI_interp, RotCorParams)
 
 end subroutine AFI_ComputeAirfoilCoefs
-!--------------------------------------------------------------------
-subroutine AFI_ApplyRotCorr( AFI_interp, RotCorParams)
-
-   implicit none
-   type(RotCorr_InputType),       intent(inout)   :: RotCorParams
-   type(AFI_OutputType),          intent(inout)   :: AFI_interp
-   integer(IntKi)                                 :: RotCor
-
-   RotCor = RotCorParams%RotCor
-
-   ! Apply rotational correction if requested
-   select case (RotCor)
-   case (1)  ! Snel
-      call AFI_ApplySnel(AFI_interp, RotCorParams)
-   case default
-      ! do nothing
-   end select   
-
-end subroutine AFI_ApplyRotCorr
-!----------------------------------------------------------------------------------------------------------------------------------
-subroutine AFI_ApplySnel(AFI_interp, RotCorParams)
-   implicit none
-   type(RotCorr_InputType),               intent(in)    :: RotCorParams
-   type(AFI_OutputType),                  intent(inout) :: AFI_interp
-   real(ReKi) :: AOA, r_over_R, chord_over_R, tsr, g, alpha_deg, m_est, alpha0_est, cl_lin, delta_cl, snel_factor, tsr_local, chord, rLocal, rMax
-   
-   tsr = RotCorParams%tsr
-   AOA = RotCorParams%AOA
-   rLocal = RotCorParams%rLocal
-   rMax = RotCorParams%rMax
-   chord = RotCorParams%chord
-   r_over_R = RotCorParams%r_over_R
-   chord_over_r = RotCorParams%chord_over_r
-   
-   ! calc delta_cl
-   ! --- quick linear lift estimate near small AoA (2*pi per rad, alpha0 ~ 0)
-   m_est     = 2.0_ReKi * Pi_D
-   alpha0_est= 0.0_ReKi
-   cl_lin    = m_est * ( AOA - alpha0_est )
-   delta_cl = cl_lin - AFI_interp%Cl 
-   
-   alpha_deg = ABS(AOA * 180.0_ReKi / Pi_D)
-
-   ! H. Snel, R. Houwink, and W. J. Piers. Sectional Prediction of 3D Effects for Separated Flow on Rotating Blades. 1993.
-   ! blending factor g(α) defined in degrees as per QBlade doc
-   if ((alpha_deg > 0.0_ReKi) .AND. (alpha_deg < 30.0_ReKi)) then
-      g = 1.0
-   elseif ( (alpha_deg >= 30.0_ReKi) .AND. (alpha_deg < 60.0_ReKi)) then
-      g = 0.5_ReKi * (1.0_ReKi + cos(D2R*(6.0_ReKi*alpha_deg - 180.0_ReKi)))
-   else ! alpha_deg >= 60 
-      g = 0.0_ReKi
-   end if
-
-   tsr_local=tsr* r_over_R  ! local tip-speed ratio
-   snel_factor = (3.1 * tsr_local**2 / (1.0 + tsr_local**2)) * g * (chord_over_r**2)
-
-   AFI_interp%Cl = AFI_interp%Cl + snel_factor * delta_cl 
-  
-end subroutine AFI_ApplySnel
 !----------------------------------------------------------------------------------------------------------------------------------  
-!> This routine calculates Cl, Cd, Cm, (and Cpmin) for a set of tables which are dependent on AOA as well as a 2nd user-defined varible, could be Re or Cntrl, etc.
+!> This routine calculates Cl, Cd, Cm, (and Cpmin) for a set of tables which are dependent on AOA as well as a 2nd user-defined variable, could be Re or Cntrl, etc.
 subroutine AFI_ComputeUACoefs( p, Re, UserProp, UA_BL, errMsg, errStat )
 
    type(AFI_ParameterType), intent(in   ) :: p                             !< This structure stores all the module parameters that are set by AirfoilInfo during the initialization phase.
@@ -1906,20 +2005,39 @@ subroutine AFI_ComputeUACoefs( p, Re, UserProp, UA_BL, errMsg, errStat )
 
       ! These coefs are stored in the p data structures based on Re
    
-   if ( p%AFTabMod == AFITable_1 ) then 
-      call AFI_CopyUA_BL_Type( p%Table(1)%UA_BL, UA_BL, MESH_NEWCOPY, errStat, errMsg )  ! this doesn't have a mesh, so the control code is irrelevant
-      return
-   elseif ( p%AFTabMod == AFITable_2Re ) then
+   ! Check if rotation correction is enabled
+   if ( p%RotCorParams%RotCor == 1 ) then
+      ! Handle rotation correction interpolation
+      if ( p%AFTabMod == AFITable_1 ) then 
+         call AFI_ComputeUACoefsRotCor1D( p, UA_BL, errStat, errMsg )
+         return
+      elseif ( p%AFTabMod == AFITable_2Re ) then
 #ifndef AFI_USE_LINEAR_RE
-      ReInterp = log( Re )
+         ReInterp = log( Re )
 #else
-      ReInterp =      Re
+         ReInterp =      Re
 #endif
-      call AFI_ComputeUACoefs2D( ReInterp, p, UA_BL, errStat, errMsg )
-   else !if ( p%AFTabMod == AFITable_2User ) then
-      call AFI_ComputeUACoefs2D( UserProp, p, UA_BL, errStat, errMsg )
+         call AFI_ComputeUACoefsRotCor2D( ReInterp, p, UA_BL, errStat, errMsg )
+      else !if ( p%AFTabMod == AFITable_2User ) then
+         call AFI_ComputeUACoefsRotCor2D( UserProp, p, UA_BL, errStat, errMsg )
+      end if
+   else
+      ! Original logic without rotation correction
+      if ( p%AFTabMod == AFITable_1 ) then 
+         call AFI_CopyUA_BL_Type( p%Table(1)%UA_BL, UA_BL, MESH_NEWCOPY, errStat, errMsg )  ! this doesn't have a mesh, so the control code is irrelevant
+         return
+      elseif ( p%AFTabMod == AFITable_2Re ) then
+#ifndef AFI_USE_LINEAR_RE
+         ReInterp = log( Re )
+#else
+         ReInterp =      Re
+#endif
+         call AFI_ComputeUACoefs2D( ReInterp, p, UA_BL, errStat, errMsg )
+      else !if ( p%AFTabMod == AFITable_2User ) then
+         call AFI_ComputeUACoefs2D( UserProp, p, UA_BL, errStat, errMsg )
+      end if
    end if
-   
+     
    call MPi2Pi( UA_BL%alpha0 )
    call MPi2Pi( UA_BL%alpha1 )
    call MPi2Pi( UA_BL%alpha2 )
@@ -1927,7 +2045,635 @@ subroutine AFI_ComputeUACoefs( p, Re, UserProp, UA_BL, errMsg, errStat )
    ! Cn1=1.9 Tp=1.7 Tf=3., Tv=6 Tvl=11, Cd0=0.012
    
 end subroutine AFI_ComputeUACoefs
+!----------------------------------------------------------------------------------------------------------------------------------  
+!> This routine computes airfoil coefficients from a single snel table
+subroutine AFI_ComputeAirfoilCoefsFromSnelTable( AOA, SnelTable, p, AFI_interp, errStat, errMsg )
 
+   real(ReKi),                             intent(in   ) :: AOA
+   type(RotCorr_SnellTableType),           intent(in   ) :: SnelTable
+   TYPE (AFI_ParameterType),               intent(in   ) :: p
+   type(AFI_OutputType),                   intent(  out) :: AFI_interp
+   integer(IntKi),                         intent(  out) :: errStat
+   character(*),                           intent(  out) :: errMsg
+   
+   ! Local variables
+   real                                    :: IntAFCoefs(MaxNumAFCoeffs)
+   real(ReKi)                              :: Alpha
+   integer                                 :: s1
+   
+   errStat = ErrID_None
+   errMsg  = ""
+   
+   IntAFCoefs = 0.0_ReKi ! initialize
+   s1 = size(SnelTable%Coefs,2)
+   
+   if (SnelTable%ConstData) then
+      IntAFCoefs(1:s1) = SnelTable%Coefs(1,:)   ! all the rows are constant
+   else
+      Alpha = AOA
+      call MPi2Pi ( Alpha ) ! change AOA into range of -pi to pi
+      
+      ! Spline interpolation based on requested AOA
+      IntAFCoefs(1:s1) = CubicSplineInterpM( Alpha, SnelTable%Alpha, SnelTable%Coefs, &
+                                             SnelTable%SplineCoefs, ErrStat, ErrMsg )
+   end if
+  
+   AFI_interp%Cl    = IntAFCoefs(p%ColCl)
+   AFI_interp%Cd    = IntAFCoefs(p%ColCd)
+
+   if ( p%ColCm > 0 ) then
+      AFI_interp%Cm = IntAFCoefs(p%ColCm)
+   else
+      AFI_interp%Cm    = 0.0_ReKi
+   end if
+   
+   if ( p%ColCpmin > 0 ) then
+      AFI_interp%Cpmin = IntAFCoefs(p%ColCpmin)
+   else
+      AFI_interp%Cpmin = 0.0_ReKi
+   end if
+
+   if ( p%ColUAf > 0 ) then
+      AFI_interp%f_st          = IntAFCoefs(p%ColUAf)
+      AFI_interp%fullySeparate = IntAFCoefs(p%ColUAf+1)
+      AFI_interp%fullyAttached = IntAFCoefs(p%ColUAf+2)
+   else
+      AFI_interp%f_st          = 0.0_ReKi
+      AFI_interp%fullySeparate = 0.0_ReKi
+      AFI_interp%fullyAttached = 0.0_ReKi
+   end if
+   
+   ! needed if using UnsteadyAero:
+   if (SnelTable%InclUAdata) then
+      AFI_interp%Cd0 = SnelTable%UA_BL%Cd0
+      AFI_interp%Cm0 = SnelTable%UA_BL%Cm0
+   else
+      AFI_interp%Cd0 = 0.0_ReKi
+      AFI_interp%Cm0 = 0.0_ReKi
+   end if
+
+end subroutine AFI_ComputeAirfoilCoefsFromSnelTable
+!----------------------------------------------------------------------------------------------------------------------------------  
+!> This routine handles 1D airfoil coefficient calculation with rotation correction
+subroutine AFI_ComputeAirfoilCoefsRotCor1D( AOA, p, AFI_interp, errStat, errMsg, iTable )
+
+   real(ReKi),                             intent(in   ) :: AOA
+   TYPE (AFI_ParameterType),               intent(in   ) :: p
+   type(AFI_OutputType),                   intent(  out) :: AFI_interp
+   integer(IntKi),                         intent(  out) :: errStat
+   character(*),                           intent(  out) :: errMsg
+   integer(IntKi),                         intent(in   ) :: iTable
+   
+   ! Local variables
+   integer(IntKi)                          :: snelIdxLo, snelIdxHi
+   real(ReKi)                              :: snelInterpFrac
+   type(AFI_OutputType)                    :: AFI_interpLo, AFI_interpHi
+   integer(IntKi)                          :: ErrStat2
+   character(300)                          :: ErrMsg2
+   
+   errStat = ErrID_None
+   errMsg  = ""
+   
+   ! Find the snel table indices for interpolation
+   call FindSnelTableIndices(p%RotCorParams%current_snel_factor, p%Table(iTable), &
+                             snelIdxLo, snelIdxHi, snelInterpFrac, errStat2, errMsg2)
+   call SetErrStat(errStat2, errMsg2, errStat, errMsg, 'AFI_ComputeAirfoilCoefsRotCor1D')
+   if (errStat >= AbortErrLev) return
+   
+   ! Get coefficients from lower snel table
+   call AFI_ComputeAirfoilCoefsFromSnelTable( AOA, p%Table(iTable)%snelTables(snelIdxLo), p, AFI_interpLo, errStat2, errMsg2 )
+   call SetErrStat(errStat2, errMsg2, errStat, errMsg, 'AFI_ComputeAirfoilCoefsRotCor1D')
+   if (errStat >= AbortErrLev) return
+   
+   if (snelIdxLo == snelIdxHi) then
+      ! No interpolation needed
+      AFI_interp = AFI_interpLo
+   else
+      ! Get coefficients from higher snel table
+      call AFI_ComputeAirfoilCoefsFromSnelTable( AOA, p%Table(iTable)%snelTables(snelIdxHi), p, AFI_interpHi, errStat2, errMsg2 )
+      call SetErrStat(errStat2, errMsg2, errStat, errMsg, 'AFI_ComputeAirfoilCoefsRotCor1D')
+      if (errStat >= AbortErrLev) return
+      
+      ! Interpolate between the two results
+      AFI_interp%Cl = AFI_interpLo%Cl + snelInterpFrac * (AFI_interpHi%Cl - AFI_interpLo%Cl)
+      AFI_interp%Cd = AFI_interpLo%Cd + snelInterpFrac * (AFI_interpHi%Cd - AFI_interpLo%Cd)
+      AFI_interp%Cm = AFI_interpLo%Cm + snelInterpFrac * (AFI_interpHi%Cm - AFI_interpLo%Cm)
+	  AFI_interp%Cd0 = AFI_interpLo%Cd0 + snelInterpFrac * (AFI_interpHi%Cd0 - AFI_interpLo%Cd0)
+	  AFI_interp%Cm0 = AFI_interpLo%Cm0 + snelInterpFrac * (AFI_interpHi%Cm0 - AFI_interpLo%Cm0)
+      AFI_interp%Cpmin = AFI_interpLo%Cpmin + snelInterpFrac * (AFI_interpHi%Cpmin - AFI_interpLo%Cpmin)
+      AFI_interp%f_st = AFI_interpLo%f_st + snelInterpFrac * (AFI_interpHi%f_st - AFI_interpLo%f_st)
+	  AFI_interp%FullySeparate = AFI_interpLo%FullySeparate + snelInterpFrac * (AFI_interpHi%FullySeparate - AFI_interpLo%FullySeparate)
+	  AFI_interp%FullyAttached = AFI_interpLo%FullyAttached + snelInterpFrac * (AFI_interpHi%FullyAttached - AFI_interpLo%FullyAttached)
+   end if
+
+end subroutine AFI_ComputeAirfoilCoefsRotCor1D
+!----------------------------------------------------------------------------------------------------------------------------------  
+!> This routine handles 2D airfoil coefficient calculation with rotation correction
+subroutine AFI_ComputeAirfoilCoefsRotCor2D( AOA, SecondProp, p, AFI_interp, errStat, errMsg )
+
+   real(ReKi),                             intent(in   ) :: AOA
+   real(ReKi),                             intent(in   ) :: SecondProp              ! Re or UserProp
+   TYPE (AFI_ParameterType),               intent(in   ) :: p
+   type(AFI_OutputType),                   intent(  out) :: AFI_interp
+   integer(IntKi),                         intent(  out) :: errStat
+   character(*),                           intent(  out) :: errMsg
+   
+   ! Local variables
+   integer(IntKi)                          :: snelIdxLo, snelIdxHi
+   real(ReKi)                              :: snelInterpFrac
+   type(AFI_OutputType)                    :: AFI_interpLo, AFI_interpHi
+   integer(IntKi)                          :: ErrStat2
+   character(300)                          :: ErrMsg2
+   
+   errStat = ErrID_None
+   errMsg  = ""
+   
+   ! For 2D case, we need to do 2D interpolation on Re/UserProp first, then snel interpolation
+   ! This requires more complex logic to handle multiple table interpolation
+   
+   ! Find the snel table indices for interpolation based on current_snel_factor
+   call FindSnelTableIndices(p%RotCorParams%current_snel_factor, p%Table(1), &
+                             snelIdxLo, snelIdxHi, snelInterpFrac, errStat2, errMsg2)
+   call SetErrStat(errStat2, errMsg2, errStat, errMsg, 'AFI_ComputeAirfoilCoefsRotCor2D')
+   if (errStat >= AbortErrLev) return
+   
+   ! Get coefficients using 2D interpolation on the lower snel factor tables
+   call AFI_Compute2DInterpolationRotCor( AOA, SecondProp, p, snelIdxLo, &
+                                          AFI_interpLo, errStat2, errMsg2 )
+   call SetErrStat(errStat2, errMsg2, errStat, errMsg, 'AFI_ComputeAirfoilCoefsRotCor2D')
+   if (errStat >= AbortErrLev) return
+   
+   if (snelIdxLo == snelIdxHi) then
+      ! No snel interpolation needed
+      AFI_interp = AFI_interpLo
+   else
+      ! Get coefficients using 2D interpolation on the higher snel factor tables
+      call AFI_Compute2DInterpolationRotCor( AOA, SecondProp, p, snelIdxHi, &
+                                             AFI_interpHi, errStat2, errMsg2 )
+      call SetErrStat(errStat2, errMsg2, errStat, errMsg, 'AFI_ComputeAirfoilCoefsRotCor2D')
+      if (errStat >= AbortErrLev) return
+      
+      ! Interpolate between the two snel factor results
+      AFI_interp%Cl = AFI_interpLo%Cl + snelInterpFrac * (AFI_interpHi%Cl - AFI_interpLo%Cl)
+      AFI_interp%Cd = AFI_interpLo%Cd + snelInterpFrac * (AFI_interpHi%Cd - AFI_interpLo%Cd)
+      AFI_interp%Cm = AFI_interpLo%Cm + snelInterpFrac * (AFI_interpHi%Cm - AFI_interpLo%Cm)
+	  AFI_interp%Cd0 = AFI_interpLo%Cd0 + snelInterpFrac * (AFI_interpHi%Cd0 - AFI_interpLo%Cd0)
+	  AFI_interp%Cm0 = AFI_interpLo%Cm0 + snelInterpFrac * (AFI_interpHi%Cm0 - AFI_interpLo%Cm0)
+      AFI_interp%Cpmin = AFI_interpLo%Cpmin + snelInterpFrac * (AFI_interpHi%Cpmin - AFI_interpLo%Cpmin)
+      AFI_interp%f_st = AFI_interpLo%f_st + snelInterpFrac * (AFI_interpHi%f_st - AFI_interpLo%f_st)
+	  AFI_interp%FullySeparate = AFI_interpLo%FullySeparate + snelInterpFrac * (AFI_interpHi%FullySeparate - AFI_interpLo%FullySeparate)
+	  AFI_interp%FullyAttached = AFI_interpLo%FullyAttached + snelInterpFrac * (AFI_interpHi%FullyAttached - AFI_interpLo%FullyAttached)
+   end if
+
+end subroutine AFI_ComputeAirfoilCoefsRotCor2D
+!----------------------------------------------------------------------------------------------------------------------------------  
+!> This routine handles 1D UA coefficient calculation with rotation correction
+subroutine AFI_ComputeUACoefsRotCor1D( p, UA_BL, errStat, errMsg )
+
+   type(AFI_ParameterType), intent(in   ) :: p
+   type(AFI_UA_BL_Type),    intent(  out) :: UA_BL
+   integer(IntKi),          intent(  out) :: errStat
+   character(*),            intent(  out) :: errMsg
+   
+   ! Local variables
+   integer(IntKi)                          :: snelIdxLo, snelIdxHi
+   real(ReKi)                              :: snelInterpFrac
+   type(AFI_UA_BL_Type)                    :: UA_BL_Lo, UA_BL_Hi
+   integer(IntKi)                          :: ErrStat2
+   character(300)                          :: ErrMsg2
+   
+   errStat = ErrID_None
+   errMsg  = ""
+   
+   ! Find the snel table indices for interpolation
+   call FindSnelTableIndices(p%RotCorParams%current_snel_factor, p%Table(1), &
+                             snelIdxLo, snelIdxHi, snelInterpFrac, errStat2, errMsg2)
+   call SetErrStat(errStat2, errMsg2, errStat, errMsg, 'AFI_ComputeUACoefsRotCor1D')
+   if (errStat >= AbortErrLev) return
+   ! Copy UA_BL from lower snel table
+   call AFI_CopyUA_BL_Type( p%Table(1)%snelTables(snelIdxLo)%UA_BL, UA_BL_Lo, MESH_NEWCOPY, errStat2, errMsg2 )
+   call SetErrStat(errStat2, errMsg2, errStat, errMsg, 'AFI_ComputeUACoefsRotCor1D')
+   if (errStat >= AbortErrLev) return
+   
+   if (snelIdxLo == snelIdxHi) then
+      ! No interpolation needed
+      UA_BL = UA_BL_Lo
+   else
+      ! Copy UA_BL from higher snel table
+      call AFI_CopyUA_BL_Type( p%Table(1)%snelTables(snelIdxHi)%UA_BL, UA_BL_Hi, MESH_NEWCOPY, errStat2, errMsg2 )
+      call SetErrStat(errStat2, errMsg2, errStat, errMsg, 'AFI_ComputeUACoefsRotCor1D')
+      if (errStat >= AbortErrLev) return
+      
+      ! Interpolate UA parameters (copy structure from lower, then interpolate values)
+      UA_BL = UA_BL_Lo
+      call InterpolateUABLType(UA_BL_Lo, UA_BL_Hi, snelInterpFrac, UA_BL)
+      
+      ! Clean up
+      call AFI_DestroyUA_BL_Type(UA_BL_Hi, errStat2, errMsg2)
+   end if
+   
+   ! Clean up
+   call AFI_DestroyUA_BL_Type(UA_BL_Lo, errStat2, errMsg2)
+
+end subroutine AFI_ComputeUACoefsRotCor1D
+!----------------------------------------------------------------------------------------------------------------------------------  
+!> This routine handles 2D UA coefficient calculation with rotation correction
+subroutine AFI_ComputeUACoefsRotCor2D( SecondProp, p, UA_BL, errStat, errMsg )
+
+   real(ReKi),              intent(in   ) :: SecondProp                     ! Re or UserProp
+   type(AFI_ParameterType), intent(in   ) :: p
+   type(AFI_UA_BL_Type),    intent(  out) :: UA_BL
+   integer(IntKi),          intent(  out) :: errStat
+   character(*),            intent(  out) :: errMsg
+   
+   ! Local variables
+   integer(IntKi)                          :: snelIdxLo, snelIdxHi
+   real(ReKi)                              :: snelInterpFrac
+   type(AFI_UA_BL_Type)                    :: UA_BL_Lo, UA_BL_Hi
+   integer(IntKi)                          :: ErrStat2
+   character(300)                          :: ErrMsg2
+   
+   errStat = ErrID_None
+   errMsg  = ""
+   
+   ! Find the snel table indices for interpolation
+   call FindSnelTableIndices(p%RotCorParams%current_snel_factor, p%Table(1), &
+                             snelIdxLo, snelIdxHi, snelInterpFrac, errStat2, errMsg2)
+   call SetErrStat(errStat2, errMsg2, errStat, errMsg, 'AFI_ComputeUACoefsRotCor2D')
+   if (errStat >= AbortErrLev) return
+   
+   ! Get UA coefficients using 2D interpolation on the lower snel factor tables
+   call AFI_ComputeUA2DInterpolationRotCor( SecondProp, p, snelIdxLo, &
+                                            UA_BL_Lo, errStat2, errMsg2 )
+   call SetErrStat(errStat2, errMsg2, errStat, errMsg, 'AFI_ComputeUACoefsRotCor2D')
+   if (errStat >= AbortErrLev) return
+   
+   if (snelIdxLo == snelIdxHi) then
+      ! No snel interpolation needed
+      UA_BL = UA_BL_Lo
+   else
+      ! Get UA coefficients using 2D interpolation on the higher snel factor tables
+      call AFI_ComputeUA2DInterpolationRotCor( SecondProp, p, snelIdxHi, &
+                                               UA_BL_Hi, errStat2, errMsg2 )
+      call SetErrStat(errStat2, errMsg2, errStat, errMsg, 'AFI_ComputeUACoefsRotCor2D')
+      if (errStat >= AbortErrLev) return
+      
+      ! Interpolate UA parameters between the two snel factor results
+      UA_BL = UA_BL_Lo
+      call InterpolateUABLType(UA_BL_Lo, UA_BL_Hi, snelInterpFrac, UA_BL)
+      
+      ! Clean up
+      call AFI_DestroyUA_BL_Type(UA_BL_Hi, errStat2, errMsg2)
+   end if
+   
+   ! Clean up
+   call AFI_DestroyUA_BL_Type(UA_BL_Lo, errStat2, errMsg2)
+
+end subroutine AFI_ComputeUACoefsRotCor2D
+!----------------------------------------------------------------------------------------------------------------------------------  
+!> This routine finds the snel table indices for interpolation
+subroutine FindSnelTableIndices(current_snel_factor, Table, snelIdxLo, snelIdxHi, snelInterpFrac, errStat, errMsg)
+
+   real(ReKi),              intent(in   ) :: current_snel_factor
+   type(AFI_Table_Type),    intent(in   ) :: Table
+   integer(IntKi),          intent(  out) :: snelIdxLo, snelIdxHi
+   real(ReKi),              intent(  out) :: snelInterpFrac
+   integer(IntKi),          intent(  out) :: errStat
+   character(*),            intent(  out) :: errMsg
+   
+   ! Local variables
+   integer(IntKi)                          :: i
+   real(ReKi)                              :: max_snel_factor = 1.0_ReKi
+   integer(IntKi)                          :: num_snel_tables = 200
+   real(ReKi)                              :: snel_factor_step
+   
+   errStat = ErrID_None
+   errMsg  = ""
+   
+   ! Calculate step size (matching AFI_PrecalculateSnelTables)
+   snel_factor_step = max_snel_factor / num_snel_tables
+   
+   ! Clamp current_snel_factor to valid range
+   if (current_snel_factor <= 0.0_ReKi) then
+      snelIdxLo = 1
+      snelIdxHi = 1
+      snelInterpFrac = 0.0_ReKi
+   elseif (current_snel_factor >= max_snel_factor) then
+      snelIdxLo = num_snel_tables + 1
+      snelIdxHi = num_snel_tables + 1
+      snelInterpFrac = 0.0_ReKi
+   else
+      ! Find the indices for interpolation
+      snelIdxLo = int(current_snel_factor / snel_factor_step) + 1
+      snelIdxHi = snelIdxLo + 1
+      
+      ! Ensure indices are within bounds
+      snelIdxLo = max(1, min(snelIdxLo, num_snel_tables + 1))
+      snelIdxHi = max(1, min(snelIdxHi, num_snel_tables + 1))
+      
+      ! Calculate interpolation fraction
+      if (snelIdxHi > snelIdxLo) then
+         snelInterpFrac = (current_snel_factor - (snelIdxLo - 1) * snel_factor_step) / snel_factor_step
+      else
+         snelInterpFrac = 0.0_ReKi
+      end if
+   end if
+
+end subroutine FindSnelTableIndices
+!----------------------------------------------------------------------------------------------------------------------------------  
+!> This routine computes airfoil coefficients from a single table (wrapper for AFI_ComputeAirfoilCoefs1D)
+subroutine AFI_ComputeAirfoilCoefsFromTable( AOA, Table, p, AFI_interp, errStat, errMsg )
+
+   real(ReKi),                             intent(in   ) :: AOA
+   type(AFI_Table_Type),                   intent(in   ) :: Table
+   TYPE (AFI_ParameterType),               intent(in   ) :: p
+   type(AFI_OutputType),                   intent(  out) :: AFI_interp
+   integer(IntKi),                         intent(  out) :: errStat
+   character(*),                           intent(  out) :: errMsg
+   
+   ! Local variables
+   real                                    :: IntAFCoefs(MaxNumAFCoeffs)
+   real(ReKi)                              :: Alpha
+   integer                                 :: s1
+   
+   errStat = ErrID_None
+   errMsg  = ""
+   
+   IntAFCoefs = 0.0_ReKi ! initialize
+   s1 = size(Table%Coefs,2)
+   
+   if (Table%ConstData) then
+      IntAFCoefs(1:s1) = Table%Coefs(1,:)   ! all the rows are constant
+   else
+      Alpha = AOA
+      call MPi2Pi ( Alpha ) ! change AOA into range of -pi to pi
+      
+      ! Spline interpolation based on requested AOA
+      IntAFCoefs(1:s1) = CubicSplineInterpM( Alpha, Table%Alpha, Table%Coefs, &
+                                             Table%SplineCoefs, ErrStat, ErrMsg )
+   end if
+  
+   AFI_interp%Cl    = IntAFCoefs(p%ColCl)
+   AFI_interp%Cd    = IntAFCoefs(p%ColCd)
+
+   if ( p%ColCm > 0 ) then
+      AFI_interp%Cm = IntAFCoefs(p%ColCm)
+   else
+      AFI_interp%Cm    = 0.0_ReKi
+   end if
+   
+   if ( p%ColCpmin > 0 ) then
+      AFI_interp%Cpmin = IntAFCoefs(p%ColCpmin)
+   else
+      AFI_interp%Cpmin = 0.0_ReKi
+   end if
+
+   if ( p%ColUAf > 0 ) then
+      AFI_interp%f_st          = IntAFCoefs(p%ColUAf)
+      AFI_interp%fullySeparate = IntAFCoefs(p%ColUAf+1)
+      AFI_interp%fullyAttached = IntAFCoefs(p%ColUAf+2)
+   else
+      AFI_interp%f_st          = 0.0_ReKi
+      AFI_interp%fullySeparate = 0.0_ReKi
+      AFI_interp%fullyAttached = 0.0_ReKi
+   end if
+   
+   ! needed if using UnsteadyAero:
+   if (Table%InclUAdata) then
+      AFI_interp%Cd0 = Table%UA_BL%Cd0
+      AFI_interp%Cm0 = Table%UA_BL%Cm0
+   else
+      AFI_interp%Cd0 = 0.0_ReKi
+      AFI_interp%Cm0 = 0.0_ReKi
+   end if
+
+end subroutine AFI_ComputeAirfoilCoefsFromTable
+!----------------------------------------------------------------------------------------------------------------------------------  
+!> This routine handles 2D interpolation across Re/UserProp for a specific snel index
+subroutine AFI_Compute2DInterpolationRotCor( AOA, SecondProp, p, snelIdx, AFI_interp, errStat, errMsg )
+
+   real(ReKi),                             intent(in   ) :: AOA
+   real(ReKi),                             intent(in   ) :: SecondProp
+   TYPE (AFI_ParameterType),               intent(in   ) :: p
+   integer(IntKi),                         intent(in   ) :: snelIdx
+   type(AFI_OutputType),                   intent(  out) :: AFI_interp
+   integer(IntKi),                         intent(  out) :: errStat
+   character(*),                           intent(  out) :: errMsg
+   
+   ! Local variables
+   integer                                 :: lowerTable, upperTable
+   real(ReKi)                              :: xVals(2)
+   type(AFI_OutputType)                    :: AFI_lower, AFI_upper
+   integer(IntKi)                          :: ErrStat2
+   character(300)                          :: ErrMsg2
+   
+   errStat = ErrID_None
+   errMsg  = ""
+   
+   ! Handle boundary conditions first
+   IF ( SecondProp <= p%secondVals( 1 ) )  THEN
+      ! Use the first table's snel table
+      call AFI_ComputeAirfoilCoefsFromSnelTable( AOA, p%Table(1)%snelTables(snelIdx), &
+                                                 p, AFI_interp, errStat2, errMsg2 )
+      call SetErrStat(errStat2, errMsg2, errStat, errMsg, 'AFI_Compute2DInterpolationRotCor')
+      return
+   ELSE IF ( SecondProp >= p%secondVals( p%NumTabs ) ) THEN
+      ! Use the last table's snel table
+      call AFI_ComputeAirfoilCoefsFromSnelTable( AOA, p%Table(p%NumTabs)%snelTables(snelIdx), &
+                                                 p, AFI_interp, errStat2, errMsg2 )
+      call SetErrStat(errStat2, errMsg2, errStat, errMsg, 'AFI_Compute2DInterpolationRotCor')
+      return
+   END IF
+   
+   ! Find bounding tables for interpolation
+   call FindBoundingTables(p, SecondProp, lowerTable, upperTable, xVals)
+   
+   ! Get coefficients from lower table's snel table
+   call AFI_ComputeAirfoilCoefsFromSnelTable( AOA, p%Table(lowerTable)%snelTables(snelIdx), &
+                                              p, AFI_lower, errStat2, errMsg2 )
+   call SetErrStat(errStat2, errMsg2, errStat, errMsg, 'AFI_Compute2DInterpolationRotCor')
+   if (errStat >= AbortErrLev) return
+   
+   ! Get coefficients from upper table's snel table
+   call AFI_ComputeAirfoilCoefsFromSnelTable( AOA, p%Table(upperTable)%snelTables(snelIdx), &
+                                              p, AFI_upper, errStat2, errMsg2 )
+   call SetErrStat(errStat2, errMsg2, errStat, errMsg, 'AFI_Compute2DInterpolationRotCor')
+   if (errStat >= AbortErrLev) return
+
+   ! Linearly interpolate between the two results
+   call AFI_Output_ExtrapInterp1(AFI_lower, AFI_upper, xVals, AFI_interp, SecondProp, ErrStat2, ErrMsg2 )
+   call SetErrStat(errStat2, errMsg2, errStat, errMsg, 'AFI_Compute2DInterpolationRotCor')
+
+end subroutine AFI_Compute2DInterpolationRotCor
+!----------------------------------------------------------------------------------------------------------------------------------  
+!> This routine handles 2D UA interpolation for a specific snel index
+subroutine AFI_ComputeUA2DInterpolationRotCor( SecondProp, p, snelIdx, UA_BL, errStat, errMsg )
+
+   real(ReKi),                             intent(in   ) :: SecondProp
+   TYPE (AFI_ParameterType),               intent(in   ) :: p
+   integer(IntKi),                         intent(in   ) :: snelIdx
+   type(AFI_UA_BL_Type),                   intent(  out) :: UA_BL
+   integer(IntKi),                         intent(  out) :: errStat
+   character(*),                           intent(  out) :: errMsg
+   
+   ! Local variables
+   real(ReKi)                              :: xVals(2)
+   integer                                 :: lowerTable, upperTable
+   integer(IntKi)                          :: ErrStat2
+   character(300)                          :: ErrMsg2
+   
+   errStat = ErrID_None
+   errMsg  = ""
+   
+   ! Handle boundary conditions first
+   IF ( SecondProp <= p%secondVals( 1 ) )  THEN
+      call AFI_CopyUA_BL_Type( p%Table(1)%snelTables(snelIdx)%UA_BL, UA_BL, MESH_NEWCOPY, errStat2, errMsg2 )
+      call SetErrStat(errStat2, errMsg2, errStat, errMsg, 'AFI_ComputeUA2DInterpolationRotCor')
+      return
+   ELSE IF ( SecondProp >= p%secondVals( p%NumTabs ) ) THEN
+      call AFI_CopyUA_BL_Type( p%Table(p%NumTabs)%snelTables(snelIdx)%UA_BL, UA_BL, MESH_NEWCOPY, errStat2, errMsg2 )
+      call SetErrStat(errStat2, errMsg2, errStat, errMsg, 'AFI_ComputeUA2DInterpolationRotCor')
+      return
+   END IF
+
+   call FindBoundingTables(p, SecondProp, lowerTable, upperTable, xVals)
+
+   ! Linearly interpolate UA parameters between tables
+   call AFI_UA_BL_Type_ExtrapInterp1(p%Table(lowerTable)%snelTables(snelIdx)%UA_BL, &
+                                     p%Table(upperTable)%snelTables(snelIdx)%UA_BL, &
+                                     xVals, UA_BL, SecondProp, ErrStat2, ErrMsg2 )
+   call SetErrStat(errStat2, errMsg2, errStat, errMsg, 'AFI_ComputeUA2DInterpolationRotCor')
+
+end subroutine AFI_ComputeUA2DInterpolationRotCor
+!----------------------------------------------------------------------------------------------------------------------------------  
+!> This routine interpolates between two UA_BL_Type structures
+subroutine InterpolateUABLType(UA_BL_Lo, UA_BL_Hi, InterpFrac, UA_BL_Out)
+
+   type(AFI_UA_BL_Type),    intent(in   ) :: UA_BL_Lo, UA_BL_Hi
+   real(ReKi),              intent(in   ) :: InterpFrac
+   type(AFI_UA_BL_Type),    intent(inout) :: UA_BL_Out
+   
+   ! Linear interpolation of UA parameters
+   ! Note: UA_BL_Out should already be initialized (copied from UA_BL_Lo)
+   
+   UA_BL_Out%alpha0            = UA_BL_Lo%alpha0     + InterpFrac * (UA_BL_Hi%alpha0     - UA_BL_Lo%alpha0)				
+   UA_BL_Out%alpha1            = UA_BL_Lo%alpha1     + InterpFrac * (UA_BL_Hi%alpha1     - UA_BL_Lo%alpha1)                
+   UA_BL_Out%alpha2            = UA_BL_Lo%alpha2     + InterpFrac * (UA_BL_Hi%alpha2     - UA_BL_Lo%alpha2)                
+   UA_BL_Out%eta_e             = UA_BL_Lo%eta_e      + InterpFrac * (UA_BL_Hi%eta_e      - UA_BL_Lo%eta_e)       
+   UA_BL_Out%C_nalpha          = UA_BL_Lo%C_nalpha   + InterpFrac * (UA_BL_Hi%C_nalpha   - UA_BL_Lo%C_nalpha)       
+   UA_BL_Out%C_lalpha          = UA_BL_Lo%C_lalpha   + InterpFrac * (UA_BL_Hi%C_lalpha   - UA_BL_Lo%C_lalpha)                             
+   UA_BL_Out%T_f0              = UA_BL_Lo%T_f0       + InterpFrac * (UA_BL_Hi%T_f0       - UA_BL_Lo%T_f0)    																											  
+   UA_BL_Out%T_V0              = UA_BL_Lo%T_V0       + InterpFrac * (UA_BL_Hi%T_V0       - UA_BL_Lo%T_V0)                                                                                                                
+   UA_BL_Out%T_p               = UA_BL_Lo%T_p        + InterpFrac * (UA_BL_Hi%T_p        - UA_BL_Lo%T_p)                                                                                                               
+   UA_BL_Out%T_VL              = UA_BL_Lo%T_VL       + InterpFrac * (UA_BL_Hi%T_VL       - UA_BL_Lo%T_VL)                                                                                                              
+   UA_BL_Out%b1                = UA_BL_Lo%b1         + InterpFrac * (UA_BL_Hi%b1         - UA_BL_Lo%b1)                                                                                                               
+   UA_BL_Out%b2                = UA_BL_Lo%b2         + InterpFrac * (UA_BL_Hi%b2         - UA_BL_Lo%b2)                                                                                                               
+   UA_BL_Out%b5                = UA_BL_Lo%b5         + InterpFrac * (UA_BL_Hi%b5         - UA_BL_Lo%b5)                                                                                                               
+   UA_BL_Out%A1                = UA_BL_Lo%A1         + InterpFrac * (UA_BL_Hi%A1         - UA_BL_Lo%A1)                                                                                                               
+   UA_BL_Out%A2                = UA_BL_Lo%A2         + InterpFrac * (UA_BL_Hi%A2         - UA_BL_Lo%A2)                                                                                                          
+   UA_BL_Out%A5                = UA_BL_Lo%A5         + InterpFrac * (UA_BL_Hi%A5         - UA_BL_Lo%A5)
+   UA_BL_Out%S1                = UA_BL_Lo%S1         + InterpFrac * (UA_BL_Hi%S1         - UA_BL_Lo%S1)
+   UA_BL_Out%S2                = UA_BL_Lo%S2         + InterpFrac * (UA_BL_Hi%S2         - UA_BL_Lo%S2)
+   UA_BL_Out%S3                = UA_BL_Lo%S3         + InterpFrac * (UA_BL_Hi%S3         - UA_BL_Lo%S3)
+   UA_BL_Out%S4                = UA_BL_Lo%S4         + InterpFrac * (UA_BL_Hi%S4         - UA_BL_Lo%S4)
+   UA_BL_Out%Cn1               = UA_BL_Lo%Cn1        + InterpFrac * (UA_BL_Hi%Cn1        - UA_BL_Lo%Cn1)
+   UA_BL_Out%Cn2               = UA_BL_Lo%Cn2        + InterpFrac * (UA_BL_Hi%Cn2        - UA_BL_Lo%Cn2)
+   UA_BL_Out%St_sh             = UA_BL_Lo%St_sh      + InterpFrac * (UA_BL_Hi%St_sh      - UA_BL_Lo%St_sh)
+   UA_BL_Out%Cd0               = UA_BL_Lo%Cd0        + InterpFrac * (UA_BL_Hi%Cd0        - UA_BL_Lo%Cd0)
+   UA_BL_Out%Cm0               = UA_BL_Lo%Cm0        + InterpFrac * (UA_BL_Hi%Cm0        - UA_BL_Lo%Cm0)   
+   UA_BL_Out%k0                = UA_BL_Lo%k0         + InterpFrac * (UA_BL_Hi%k0         - UA_BL_Lo%k0)
+   UA_BL_Out%k1                = UA_BL_Lo%k1         + InterpFrac * (UA_BL_Hi%k1         - UA_BL_Lo%k1)
+   UA_BL_Out%k2                = UA_BL_Lo%k2         + InterpFrac * (UA_BL_Hi%k2         - UA_BL_Lo%k2)
+   UA_BL_Out%k3                = UA_BL_Lo%k3         + InterpFrac * (UA_BL_Hi%k3         - UA_BL_Lo%k3)
+   UA_BL_Out%k1_hat            = UA_BL_Lo%k1_hat     + InterpFrac * (UA_BL_Hi%k1_hat     - UA_BL_Lo%k1_hat)
+   UA_BL_Out%x_cp_bar          = UA_BL_Lo%x_cp_bar   + InterpFrac * (UA_BL_Hi%x_cp_bar   - UA_BL_Lo%x_cp_bar)
+   UA_BL_Out%UACutout          = UA_BL_Lo%UACutout   + InterpFrac * (UA_BL_Hi%UACutout   - UA_BL_Lo%UACutout)
+   UA_BL_Out%UACutout_delta    = UA_BL_Lo%UACutout_delta + InterpFrac * (UA_BL_Hi%UACutout_delta - UA_BL_Lo%UACutout_delta) 
+   UA_BL_Out%UACutout_blend    = UA_BL_Lo%UACutout_blend + InterpFrac * (UA_BL_Hi%UACutout_blend - UA_BL_Lo%UACutout_blend)  
+   UA_BL_Out%filtCutOff        = UA_BL_Lo%filtCutOff + InterpFrac * (UA_BL_Hi%filtCutOff - UA_BL_Lo%filtCutOff)
+   UA_BL_Out%alphaUpper        = UA_BL_Lo%alphaUpper + InterpFrac * (UA_BL_Hi%alphaUpper - UA_BL_Lo%alphaUpper) 
+   UA_BL_Out%alphaLower        = UA_BL_Lo%alphaLower + InterpFrac * (UA_BL_Hi%alphaLower - UA_BL_Lo%alphaLower)  
+   UA_BL_Out%c_alphaLower      = UA_BL_Lo%c_alphaLower + InterpFrac * (UA_BL_Hi%c_alphaLower - UA_BL_Lo%c_alphaLower)  
+   UA_BL_Out%c_alphaUpper      = UA_BL_Lo%c_alphaUpper + InterpFrac * (UA_BL_Hi%c_alphaUpper - UA_BL_Lo%c_alphaUpper)  
+   UA_BL_Out%alpha0ReverseFlow = UA_BL_Lo%alpha0ReverseFlow + InterpFrac * (UA_BL_Hi%alpha0ReverseFlow - UA_BL_Lo%alpha0ReverseFlow)  
+   UA_BL_Out%alphaBreakUpper   = UA_BL_Lo%alphaBreakUpper + InterpFrac * (UA_BL_Hi%alphaBreakUpper - UA_BL_Lo%alphaBreakUpper)  
+   UA_BL_Out%CnBreakUpper      = UA_BL_Lo%CnBreakUpper + InterpFrac * (UA_BL_Hi%CnBreakUpper - UA_BL_Lo%CnBreakUpper)  
+   UA_BL_Out%alphaBreakLower   = UA_BL_Lo%alphaBreakLower + InterpFrac * (UA_BL_Hi%alphaBreakLower - UA_BL_Lo%alphaBreakLower)  
+   UA_BL_Out%CnBreakLower      = UA_BL_Lo%CnBreakLower + InterpFrac * (UA_BL_Hi%CnBreakLower - UA_BL_Lo%CnBreakLower)  
+
+end subroutine InterpolateUABLType
+!----------------------------------------------------------------------------------------------------------------------------------
+subroutine AFI_CalcSnel(AFInfo, snel_factor)
+   implicit none
+   type(AFI_ParameterType),      intent(in   )  :: AFInfo      ! The airfoil parameter data
+   real(ReKi),                  intent(  out)   :: snel_factor
+   
+   ! Local variables
+   real(ReKi) :: r_over_R, chord_over_R, tsr, tsr_local
+   real(ReKi) :: chord, rLocal, rMax
+   
+   ! Get parameters from AFInfo structure
+   tsr = AFInfo%RotCorParams%tsr
+   rLocal = AFInfo%RotCorParams%rLocal
+   rMax = AFInfo%RotCorParams%rMax
+   chord = AFInfo%RotCorParams%chord
+   
+   ! Calculate normalized ratios with safe divide
+   r_over_R = merge(rLocal/rMax, 0.0_ReKi, rMax > tiny(1.0_ReKi))
+   chord_over_r = merge(chord/rLocal, 0.0_ReKi, rLocal > tiny(1.0_ReKi))
+   tsr_local = tsr * r_over_R
+   
+   ! Calculate Snel factor once (doesn't depend on AOA)
+   snel_factor = (3.1_ReKi * tsr_local**2 / (1.0_ReKi + tsr_local**2)) * (chord_over_r**2) 
+   
+end subroutine AFI_CalcSnel
+!----------------------------------------------------------------------------------------------------------------------------------
+subroutine AFI_ApplySnel(AOA_vec, Cl_vec, snel_factor, Cl_0, slope)
+    implicit none
+    real(ReKi),      intent(in)     :: AOA_vec(:)
+    real(ReKi),      intent(inout)  :: Cl_vec(:)
+    real(ReKi),      intent(in)     :: snel_factor
+    real(ReKi),      intent(in)     :: Cl_0, slope
+    
+    ! Local variables
+    integer(IntKi)  :: num_aoa
+    real(ReKi), allocatable :: alpha_deg(:), g(:)
+    real(ReKi), allocatable :: cl_lin(:), delta_cl(:), correction(:)
+    logical, allocatable :: mask1(:), mask2(:)
+    
+    ! Get the size of the input arrays for allocation
+    num_aoa = size(AOA_vec)
+    
+    ! Allocate all local arrays based on the number of AOA points
+    allocate(alpha_deg(num_aoa), g(num_aoa))
+    allocate(cl_lin(num_aoa), delta_cl(num_aoa), correction(num_aoa))
+    allocate(mask1(num_aoa), mask2(num_aoa))
+
+    ! Vectorized calculations
+    alpha_deg = AOA_vec * 180.0_ReKi / Pi_D
+    cl_lin = slope * AOA_vec + Cl_0
+    delta_cl = cl_lin - Cl_vec
+    
+    ! Vectorized blending factor calculation
+    ! H. Snel, R. Houwink, and W. J. Piers. 1993.
+    mask1 = (alpha_deg > 0.0_ReKi) .AND. (alpha_deg < 30.0_ReKi)
+    mask2 = (alpha_deg >= 30.0_ReKi) .AND. (alpha_deg < 60.0_ReKi)
+    
+    g = 0.0_ReKi  ! default for alpha_deg >= 60
+    where (mask1)
+        g = 1.0_ReKi
+    end where
+    where (mask2)
+        g = 0.5_ReKi * (1.0_ReKi + cos(D2R*(6.0_ReKi*alpha_deg - 180.0_ReKi)))
+    end where
+    
+    ! Vectorized final correction
+    correction = snel_factor * g * delta_cl
+    Cl_vec = Cl_vec + correction
+    
+    deallocate(alpha_deg, g, cl_lin, delta_cl, correction, mask1, mask2)
+
+end subroutine AFI_ApplySnel
 !=============================================================================
 subroutine AFI_WrHeader(delim, FileName, unOutFile, ErrStat, ErrMsg)
 

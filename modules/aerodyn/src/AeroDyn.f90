@@ -1687,7 +1687,7 @@ subroutine AD_UpdateStates( t, n, u, utimes, p, x, xd, z, OtherState, m, errStat
    integer(IntKi),                 intent(in   ) :: n          !< Current simulation time step n = 0,1,...
    type(AD_InputType),             intent(inout) :: u(:)       !< Inputs at utimes (out only for mesh record-keeping in ExtrapInterp routine)
    real(DbKi),                     intent(in   ) :: utimes(:)  !< Times associated with u(:), in seconds
-   type(AD_ParameterType),         intent(in   ) :: p          !< Parameters
+   type(AD_ParameterType),         intent(inout) :: p          !< Parameters
    type(AD_ContinuousStateType),   intent(inout) :: x          !< Input: Continuous states at t;
                                                                !!   Output: Continuous states at t + Interval
    type(AD_DiscreteStateType),     intent(inout) :: xd         !< Input: Discrete states at t;
@@ -2660,7 +2660,7 @@ subroutine AD_CalcConstrStateResidual( Time, u, p, x, xd, z, OtherState, m, z_re
 
    REAL(DbKi),                   INTENT(IN   )   :: Time        !< Current simulation time in seconds
    TYPE(AD_InputType),           INTENT(IN   )   :: u           !< Inputs at Time
-   TYPE(AD_ParameterType),       INTENT(IN   )   :: p           !< Parameters
+   TYPE(AD_ParameterType),       INTENT(INOUT)   :: p           !< Parameters
    TYPE(AD_ContinuousStateType), INTENT(IN   )   :: x           !< Continuous states at Time
    TYPE(AD_DiscreteStateType),   INTENT(IN   )   :: xd          !< Discrete states at Time
    TYPE(AD_ConstraintStateType), INTENT(IN   )   :: z           !< Constraint states at Time (possibly a guess)
@@ -2698,7 +2698,7 @@ subroutine RotCalcConstrStateResidual( Time, u, RotInflow, p, p_AD, x, xd, z, Ot
    TYPE(RotInputType),           INTENT(IN   )   :: u           !< Inputs at Time
    TYPE(RotInflowType),          INTENT(IN   )   :: RotInflow   !< rotor inflow at Time
    TYPE(RotParameterType),       INTENT(IN   )   :: p           !< Parameters
-   TYPE(AD_ParameterType),       INTENT(IN   )   :: p_AD        !< Parameters
+   TYPE(AD_ParameterType),       INTENT(INOUT)   :: p_AD        !< Parameters
    TYPE(RotContinuousStateType), INTENT(IN   )   :: x           !< Continuous states at Time
    TYPE(RotDiscreteStateType),   INTENT(IN   )   :: xd          !< Discrete states at Time
    TYPE(RotConstraintStateType), INTENT(IN   )   :: z           !< Constraint states at Time (possibly a guess)
@@ -2743,7 +2743,7 @@ subroutine RotCalcContStateDeriv( t, u, RotInflow, p, p_AD, x, xd, z, OtherState
    TYPE(RotInputType),             INTENT(IN   )  :: u           ! Inputs at t
    TYPE(RotInflowType),            INTENT(IN   )  :: RotInflow   !< Rotor inflow Inputs at Time
    TYPE(RotParameterType),         INTENT(IN   )  :: p           ! Parameters
-   TYPE(AD_ParameterType),         INTENT(IN   )  :: p_AD        ! Parameters
+   TYPE(AD_ParameterType),         INTENT(INOUT)  :: p_AD        ! Parameters
    TYPE(RotContinuousStateType),   INTENT(IN   )  :: x           ! Continuous states at t
    TYPE(RotDiscreteStateType),     INTENT(IN   )  :: xd          ! Discrete states at t
    TYPE(RotConstraintStateType),   INTENT(IN   )  :: z           ! Constraint states at t

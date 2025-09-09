@@ -52,7 +52,7 @@ subroutine sub_brent(bemt_parameters, bemt_inputs, iBladeNode, jBlade, x,a_in,b_
     real(ReKi), intent(in) :: a_in  !< lower bound of solution region
     real(ReKi), intent(in) :: b_in  !< upper bound of solution region
     
-    TYPE (AFI_ParameterType),  INTENT(IN   ) :: AFInfo  !< The derived type for holding the constant parameters for this airfoil.
+    TYPE (AFI_ParameterType),  INTENT(INOUT) :: AFInfo  !< The derived type for holding the constant parameters for this airfoil.
     real(ReKi), intent(in),  optional :: fa_in !< starting value for f(a), if not present, will be evaluated
     real(ReKi), intent(in),  optional :: fb_in !< starting value for f(b), if not present, will be evaluated
     real(ReKi), intent(in),  optional :: xtoler_in !< 

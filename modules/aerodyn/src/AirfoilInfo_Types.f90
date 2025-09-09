@@ -141,7 +141,8 @@ IMPLICIT NONE
     real(ReKi)        :: chord          = 0.0_ReKi
 	INTEGER(IntKi)    :: RotCor = 0_IntKi
     INTEGER(IntKi)    :: UAMod = 0_IntKi      !< UA model: used to determine how UA separation functions should be calculated [-]	
-    LOGICAL           :: UA_Flag = .false.      !< logical flag indicating whether to use UnsteadyAero [-]																																																		
+    LOGICAL           :: UA_Flag = .false.      !< logical flag indicating whether to use UnsteadyAero [-]	
+    real(ReKi)        :: current_snel_factor = 0.0_ReKi
   END TYPE RotCorr_InputType  
 ! =======================
 ! =========  RotCorr_SnellTableType  =======  
