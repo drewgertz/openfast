@@ -960,7 +960,7 @@ SUBROUTINE AFI_PrecalculateSnelTables(p, iTable, InitInp, ErrStat, ErrMsg, Routi
             p%Table(iTable)%snelTables(snelIdx)%NumAlf = tempSnelTable%NumAlf
             p%Table(iTable)%snelTables(snelIdx)%ConstData = tempSnelTable%ConstData
             p%Table(iTable)%snelTables(snelIdx)%InclUAdata = tempSnelTable%InclUAdata
-            p%Table(iTable)%snelTables(snelIdx)%UA_BL = tempSnelTable%UA_BL
+            p%Table(iTable)%snelTables(snelIdx)%UA_BL = tempSnelTable%UA_BL			
 			
         end if
     ENDDO ! snelIdx loop
@@ -1213,6 +1213,40 @@ END SUBROUTINE AFI_PrecalculateSnelTables
                   iHigh2 = iHigh2 - 1
                end do
 
+               ! Override problematic UA bounds for better linear region detection
+               if (abs(p%UA_BL%alphaUpper - p%UA_BL%alphaLower) < 2.0_ReKi * D2R) then
+                  ! If the detected range is too narrow, use a reasonable fixed range
+                  p%UA_BL%alphaLower = -5.0_ReKi * D2R
+                  p%UA_BL%alphaUpper =  10.0_ReKi * D2R
+                  !write(*,'(A)') 'DEBUG: Overriding narrow UA bounds with -5° to +10°'
+               end if
+               
+               ! Force a reasonable margin regardless of the bounds
+               alphaMargin = max(1.0_ReKi * D2R, 0.1_ReKi * (p%UA_BL%alphaUpper - p%UA_BL%alphaLower))
+               
+               ! Ensure we get at least -7° to +7° range for Calculate_C_alpha
+               iLow2 = 1
+               iHigh2 = p%NumAlf
+               DO Row = 1, p%NumAlf  ! Use Row instead of i
+                   if (p%alpha(Row) >= -7.0_ReKi * D2R) then
+                       iLow2 = Row
+                       EXIT
+                   end if
+               END DO
+               DO Row = p%NumAlf, 1, -1  ! Use Row instead of i
+                   if (p%alpha(Row) <= 7.0_ReKi * D2R) then
+                       iHigh2 = Row
+                       EXIT
+                   end if
+               END DO
+               
+               ! Ensure we have enough points
+               if (iHigh2 - iLow2 < 5) then
+                  write(*,'(A)') 'DEBUG: Still insufficient range, expanding further'
+                  iLow2 = max(1, iLow2 - 5)
+                  iHigh2 = min(p%NumAlf, iHigh2 + 5)
+               end if			   
+			   
                call Calculate_C_alpha(p%alpha(iLow2:iHigh2), Cn(iLow2:iHigh2), p%Coefs(iLow2:iHigh2,ColCl), Default_Cn_alpha, Default_Cl_alpha, Default_alpha0, ErrStat2, ErrMsg2)
          
                if (CalcDefaults%C_nalpha) p%UA_BL%C_nalpha = Default_Cn_alpha
@@ -1801,7 +1835,6 @@ subroutine AFI_ComputeUACoefs2D( secondaryDepVal, p, UA_BL, errStat, errMsg )
 
       ! linearly interpolate
    call AFI_UA_BL_Type_ExtrapInterp1(p%Table(lowerTable)%UA_BL, p%Table(upperTable)%UA_BL, xVals, UA_BL, secondaryDepVal, ErrStat, ErrMsg )
-
    
 end subroutine AFI_ComputeUACoefs2D  
 !----------------------------------------------------------------------------------------------------------------------------------  
@@ -2134,6 +2167,13 @@ subroutine AFI_ComputeAirfoilCoefsRotCor1D( AOA, p, AFI_interp, errStat, errMsg,
    errStat = ErrID_None
    errMsg  = ""
    
+   ! Handle constant data case - similar to AFI_ComputeAirfoilCoefs1D
+   if (p%Table(iTable)%ConstData) then
+      ! For constant data, use the regular 1D routine
+      call AFI_ComputeAirfoilCoefs1D( AOA, p, AFI_interp, errStat, errMsg, iTable )
+      return
+   end if
+   
    ! Find the snel table indices for interpolation
    call FindSnelTableIndices(p%RotCorParams%current_snel_factor, p%Table(iTable), &
                              snelIdxLo, snelIdxHi, snelInterpFrac, errStat2, errMsg2)
@@ -2158,12 +2198,12 @@ subroutine AFI_ComputeAirfoilCoefsRotCor1D( AOA, p, AFI_interp, errStat, errMsg,
       AFI_interp%Cl = AFI_interpLo%Cl + snelInterpFrac * (AFI_interpHi%Cl - AFI_interpLo%Cl)
       AFI_interp%Cd = AFI_interpLo%Cd + snelInterpFrac * (AFI_interpHi%Cd - AFI_interpLo%Cd)
       AFI_interp%Cm = AFI_interpLo%Cm + snelInterpFrac * (AFI_interpHi%Cm - AFI_interpLo%Cm)
-	  AFI_interp%Cd0 = AFI_interpLo%Cd0 + snelInterpFrac * (AFI_interpHi%Cd0 - AFI_interpLo%Cd0)
-	  AFI_interp%Cm0 = AFI_interpLo%Cm0 + snelInterpFrac * (AFI_interpHi%Cm0 - AFI_interpLo%Cm0)
+      AFI_interp%Cd0 = AFI_interpLo%Cd0 + snelInterpFrac * (AFI_interpHi%Cd0 - AFI_interpLo%Cd0)
+      AFI_interp%Cm0 = AFI_interpLo%Cm0 + snelInterpFrac * (AFI_interpHi%Cm0 - AFI_interpLo%Cm0)
       AFI_interp%Cpmin = AFI_interpLo%Cpmin + snelInterpFrac * (AFI_interpHi%Cpmin - AFI_interpLo%Cpmin)
       AFI_interp%f_st = AFI_interpLo%f_st + snelInterpFrac * (AFI_interpHi%f_st - AFI_interpLo%f_st)
-	  AFI_interp%FullySeparate = AFI_interpLo%FullySeparate + snelInterpFrac * (AFI_interpHi%FullySeparate - AFI_interpLo%FullySeparate)
-	  AFI_interp%FullyAttached = AFI_interpLo%FullyAttached + snelInterpFrac * (AFI_interpHi%FullyAttached - AFI_interpLo%FullyAttached)
+      AFI_interp%FullySeparate = AFI_interpLo%FullySeparate + snelInterpFrac * (AFI_interpHi%FullySeparate - AFI_interpLo%FullySeparate)
+      AFI_interp%FullyAttached = AFI_interpLo%FullyAttached + snelInterpFrac * (AFI_interpHi%FullyAttached - AFI_interpLo%FullyAttached)
    end if
 
 end subroutine AFI_ComputeAirfoilCoefsRotCor1D
@@ -2187,6 +2227,13 @@ subroutine AFI_ComputeAirfoilCoefsRotCor2D( AOA, SecondProp, p, AFI_interp, errS
    
    errStat = ErrID_None
    errMsg  = ""
+   
+   ! Handle constant data case - similar to AFI_ComputeAirfoilCoefs1D
+   if (p%Table(1)%ConstData) then
+      ! For constant data, use the regular 2D routine
+      call AFI_ComputeAirfoilCoefs2D( AOA, SecondProp, p, AFI_interp, errStat, errMsg )
+      return
+   end if
    
    ! For 2D case, we need to do 2D interpolation on Re/UserProp first, then snel interpolation
    ! This requires more complex logic to handle multiple table interpolation
@@ -2217,12 +2264,12 @@ subroutine AFI_ComputeAirfoilCoefsRotCor2D( AOA, SecondProp, p, AFI_interp, errS
       AFI_interp%Cl = AFI_interpLo%Cl + snelInterpFrac * (AFI_interpHi%Cl - AFI_interpLo%Cl)
       AFI_interp%Cd = AFI_interpLo%Cd + snelInterpFrac * (AFI_interpHi%Cd - AFI_interpLo%Cd)
       AFI_interp%Cm = AFI_interpLo%Cm + snelInterpFrac * (AFI_interpHi%Cm - AFI_interpLo%Cm)
-	  AFI_interp%Cd0 = AFI_interpLo%Cd0 + snelInterpFrac * (AFI_interpHi%Cd0 - AFI_interpLo%Cd0)
-	  AFI_interp%Cm0 = AFI_interpLo%Cm0 + snelInterpFrac * (AFI_interpHi%Cm0 - AFI_interpLo%Cm0)
+      AFI_interp%Cd0 = AFI_interpLo%Cd0 + snelInterpFrac * (AFI_interpHi%Cd0 - AFI_interpLo%Cd0)
+      AFI_interp%Cm0 = AFI_interpLo%Cm0 + snelInterpFrac * (AFI_interpHi%Cm0 - AFI_interpLo%Cm0)
       AFI_interp%Cpmin = AFI_interpLo%Cpmin + snelInterpFrac * (AFI_interpHi%Cpmin - AFI_interpLo%Cpmin)
       AFI_interp%f_st = AFI_interpLo%f_st + snelInterpFrac * (AFI_interpHi%f_st - AFI_interpLo%f_st)
-	  AFI_interp%FullySeparate = AFI_interpLo%FullySeparate + snelInterpFrac * (AFI_interpHi%FullySeparate - AFI_interpLo%FullySeparate)
-	  AFI_interp%FullyAttached = AFI_interpLo%FullyAttached + snelInterpFrac * (AFI_interpHi%FullyAttached - AFI_interpLo%FullyAttached)
+      AFI_interp%FullySeparate = AFI_interpLo%FullySeparate + snelInterpFrac * (AFI_interpHi%FullySeparate - AFI_interpLo%FullySeparate)
+      AFI_interp%FullyAttached = AFI_interpLo%FullyAttached + snelInterpFrac * (AFI_interpHi%FullyAttached - AFI_interpLo%FullyAttached)
    end if
 
 end subroutine AFI_ComputeAirfoilCoefsRotCor2D
@@ -2245,11 +2292,19 @@ subroutine AFI_ComputeUACoefsRotCor1D( p, UA_BL, errStat, errMsg )
    errStat = ErrID_None
    errMsg  = ""
    
+   ! Handle constant data case - similar to AFI_ComputeAirfoilCoefs1D
+   if (p%Table(1)%ConstData) then
+      ! For constant data, just copy the UA_BL from the first table
+      call AFI_CopyUA_BL_Type( p%Table(1)%UA_BL, UA_BL, MESH_NEWCOPY, errStat, errMsg )
+      return
+   end if
+   
    ! Find the snel table indices for interpolation
    call FindSnelTableIndices(p%RotCorParams%current_snel_factor, p%Table(1), &
                              snelIdxLo, snelIdxHi, snelInterpFrac, errStat2, errMsg2)
    call SetErrStat(errStat2, errMsg2, errStat, errMsg, 'AFI_ComputeUACoefsRotCor1D')
    if (errStat >= AbortErrLev) return
+   
    ! Copy UA_BL from lower snel table
    call AFI_CopyUA_BL_Type( p%Table(1)%snelTables(snelIdxLo)%UA_BL, UA_BL_Lo, MESH_NEWCOPY, errStat2, errMsg2 )
    call SetErrStat(errStat2, errMsg2, errStat, errMsg, 'AFI_ComputeUACoefsRotCor1D')
@@ -2295,6 +2350,13 @@ subroutine AFI_ComputeUACoefsRotCor2D( SecondProp, p, UA_BL, errStat, errMsg )
    
    errStat = ErrID_None
    errMsg  = ""
+   
+   ! Handle constant data case - similar to AFI_ComputeAirfoilCoefs1D
+   if (p%Table(1)%ConstData) then
+      ! For constant data, just copy the UA_BL from the first table
+      call AFI_CopyUA_BL_Type( p%Table(1)%UA_BL, UA_BL, MESH_NEWCOPY, errStat, errMsg )
+      return
+   end if
    
    ! Find the snel table indices for interpolation
    call FindSnelTableIndices(p%RotCorParams%current_snel_factor, p%Table(1), &
@@ -2624,6 +2686,7 @@ subroutine AFI_CalcSnel(AFInfo, snel_factor)
    tsr_local = tsr * r_over_R
    
    ! Calculate Snel factor once (doesn't depend on AOA)
+   ! H. Snel, R. Houwink, and W. J. Piers. 1993. Linenberg, 2003.
    snel_factor = (3.1_ReKi * tsr_local**2 / (1.0_ReKi + tsr_local**2)) * (chord_over_r**2) 
    
 end subroutine AFI_CalcSnel
@@ -2655,7 +2718,7 @@ subroutine AFI_ApplySnel(AOA_vec, Cl_vec, snel_factor, Cl_0, slope)
     delta_cl = cl_lin - Cl_vec
     
     ! Vectorized blending factor calculation
-    ! H. Snel, R. Houwink, and W. J. Piers. 1993.
+	! From QBlade documentation. https://docs.qblade.org/src/theory/aerodynamics/secondary_effects/himmelskamp.html#himmelskamp-effect
     mask1 = (alpha_deg > 0.0_ReKi) .AND. (alpha_deg < 30.0_ReKi)
     mask2 = (alpha_deg >= 30.0_ReKi) .AND. (alpha_deg < 60.0_ReKi)
     
