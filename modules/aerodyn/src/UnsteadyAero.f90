@@ -1592,6 +1592,7 @@ subroutine UA_ValidateAFI(UAMod, FLookup, AFInfo, ErrStat, ErrMsg)
             
             if (UAMod /= UA_HGMV) then
                if ( tab%UA_BL%alpha0 > pi .or. tab%UA_BL%alpha0 < -pi ) then
+			      write(*,*) 'UA alpha0 parameter is ',tab%UA_BL%alpha0*R2D, 'degrees.'
                   call SetErrStat(ErrID_Fatal, 'UA alpha0 parameter must be between -180 and 180 degrees.', ErrStat_tab, ErrMsg_tab, "" )
                end if
             end if ! Not UA_HGM
