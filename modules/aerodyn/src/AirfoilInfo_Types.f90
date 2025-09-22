@@ -132,21 +132,8 @@ IMPLICIT NONE
     LOGICAL  :: alphaLower = .true.      !< Calculate value for this input? [-]
   END TYPE AFI_UA_BL_Default_Type
 ! =======================
-! =========  RotCorr_InputType  =======  
-  TYPE, PUBLIC :: RotCorr_InputType
-    real(ReKi)        :: tsr			= 0.0_ReKi
-    real(ReKi)        :: AOA            = 0.0_ReKi
-    real(ReKi)        :: rLocal         = 0.0_ReKi
-    real(ReKi)        :: rMax           = 0.0_ReKi
-    real(ReKi)        :: chord          = 0.0_ReKi
-	INTEGER(IntKi)    :: RotCor = 0_IntKi
-    INTEGER(IntKi)    :: UAMod = 0_IntKi      !< UA model: used to determine how UA separation functions should be calculated [-]	
-    LOGICAL           :: UA_Flag = .false.      !< logical flag indicating whether to use UnsteadyAero [-]	
-    real(ReKi)        :: current_snel_factor = 0.0_ReKi
-  END TYPE RotCorr_InputType  
-! =======================
-! =========  RotCorr_SnellTableType  =======  
-  TYPE, PUBLIC :: RotCorr_SnellTableType
+! =========  RotCor_RotCorTableType  =======  
+  TYPE, PUBLIC :: RotCor_RotCorTableType
     real(ReKi)        :: snel_factor			= 0.0_ReKi ! Snell factor for the given table
     REAL(ReKi) , DIMENSION(:), ALLOCATABLE  :: Alpha      !< Angle-of-attack vector that matches the Coefs matrix [rad]
     REAL(ReKi) , DIMENSION(:,:), ALLOCATABLE  :: Coefs      !< Airfoil coefficients for Cd, Cl,  and maybe Cm and/or Cpmin [-]
@@ -157,7 +144,7 @@ IMPLICIT NONE
     LOGICAL  :: ConstData = .false.      !< Flag that tells if aerodynamic coefficients are the same for all alphas [-]
     LOGICAL  :: InclUAdata = .false.      !< Flag that tells if UA data is included in the input file [-]
     TYPE(AFI_UA_BL_Type)  :: UA_BL      !< The tables of Leishman-Beddoes unsteady-aero data for given Re and control setting [-]
-  END TYPE RotCorr_SnellTableType
+  END TYPE RotCor_RotCorTableType
 ! =======================
 ! =========  AFI_Table_Type  =======
   TYPE, PUBLIC :: AFI_Table_Type
@@ -170,9 +157,21 @@ IMPLICIT NONE
     LOGICAL  :: ConstData = .false.      !< Flag that tells if aerodynamic coefficients are the same for all alphas [-]
     LOGICAL  :: InclUAdata = .false.      !< Flag that tells if UA data is included in the input file [-]
     TYPE(AFI_UA_BL_Type)  :: UA_BL      !< The tables of Leishman-Beddoes unsteady-aero data for given Re and control setting [-]
-	TYPE(RotCorr_SnellTableType) , DIMENSION(:), ALLOCATABLE  :: snelTables      !< The tables of airfoil data for given Re and control setting [-]d be calculated [-].	
+	TYPE(RotCor_RotCorTableType) , DIMENSION(:), ALLOCATABLE  :: rotCorTables      !< The tables of airfoil data for given Re and control setting [-]d be calculated [-].	
   END TYPE AFI_Table_Type
 ! =======================
+! =========  RotCor_InputType  =======  
+  TYPE, PUBLIC :: RotCor_InputType
+    real(ReKi)        :: tsr			= 0.0_ReKi
+    real(ReKi)        :: AOA            = 0.0_ReKi
+    real(ReKi)        :: rLocal         = 0.0_ReKi
+    real(ReKi)        :: rMax           = 0.0_ReKi
+    real(ReKi)        :: chord          = 0.0_ReKi
+	INTEGER(IntKi)    :: RotCor = 0_IntKi
+    INTEGER(IntKi)    :: UAMod = 0_IntKi      !< UA model: used to determine how UA separation functions should be calculated [-]	
+    LOGICAL           :: UA_Flag = .false.      !< logical flag indicating whether to use UnsteadyAero [-]	
+    real(ReKi)        :: current_snel_factor = 0.0_ReKi
+  END TYPE RotCor_InputType  
 ! =========  AFI_InitInputType  =======
   TYPE, PUBLIC :: AFI_InitInputType
     CHARACTER(1024)  :: FileName      !< The name of the file the data is read from [-]
@@ -183,7 +182,7 @@ IMPLICIT NONE
     INTEGER(IntKi)  :: InCol_Cm = 0_IntKi      !< The column of the coefficient tables that holds the pitching-moment coefficient [-]
     INTEGER(IntKi)  :: InCol_Cpmin = 0_IntKi      !< The column of the coefficient tables that holds the minimum pressure coefficient [-]
     INTEGER(IntKi)  :: UAMod = 0_IntKi      !< UA model: used to determine how UA separation functions should be calculated [-]
-	TYPE(RotCorr_InputType)  :: RotCorParams      !< inputs to the rotational correction
+	TYPE(RotCor_InputType)  :: RotCorParams      !< inputs to the rotational correction
   END TYPE AFI_InitInputType
 ! =======================
 ! =========  AFI_InitOutputType  =======
@@ -210,7 +209,7 @@ IMPLICIT NONE
     TYPE(AFI_Table_Type) , DIMENSION(:), ALLOCATABLE  :: Table      !< The tables of airfoil data for given Re and control setting [-]
     CHARACTER(1024)  :: BL_file      !< The name of the file with the boundary layer data [-]
     CHARACTER(1024)  :: FileName      !< The name of the file that stored this information. [-]
-	TYPE(RotCorr_InputType)  :: RotCorParams      !< inputs to the rotational correction
+	TYPE(RotCor_InputType)  :: RotCorParams      !< inputs to the rotational correction
   END TYPE AFI_ParameterType
 ! =======================
 ! =========  AFI_InputType  =======
