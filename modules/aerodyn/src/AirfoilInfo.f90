@@ -1086,28 +1086,31 @@ ALPHA_LOOP: DO Row=1,p%Table(iTable)%NumAlf-1
                ! Force a reasonable margin regardless of the bounds
                alphaMargin = max(1.0_ReKi * D2R, 0.1_ReKi * (p%UA_BL%alphaUpper - p%UA_BL%alphaLower))
                
-               ! Ensure we get at least -7° to +7° range for Calculate_C_alpha
+               ! Ensure we get at least -5° to +5° range for Calculate_C_alpha
                iLow2 = 1
                iHigh2 = p%NumAlf
-               DO Row = 1, p%NumAlf  ! Use Row instead of i
-                   if (p%alpha(Row) >= -7.0_ReKi * D2R) then
-                       iLow2 = Row
-                       EXIT
-                   end if
-               END DO
-               DO Row = p%NumAlf, 1, -1  ! Use Row instead of i
-                   if (p%alpha(Row) <= 7.0_ReKi * D2R) then
-                       iHigh2 = Row
-                       EXIT
-                   end if
-               END DO
+
+			   ! Use the automatically detected bounds unless they are physically unreasonable
+			   if (abs(p%UA_BL%alphaUpper - p%UA_BL%alphaLower) < 2.0_ReKi * D2R) then
+			   	! FALLBACK: Only if detection fails, use a safe default range relative to zero-lift
+			   	iLow2  = minloc(abs(p%alpha - (-5.0_ReKi * D2R)), DIM=1)
+			   	iHigh2 = minloc(abs(p%alpha - ( 5.0_ReKi * D2R)), DIM=1)
+			   else
+			   	! STANDARD: Use the detected bounds with a 10% safety margin to ensure linearity
+			   	alphaMargin = 0.1_ReKi * (p%UA_BL%alphaUpper - p%UA_BL%alphaLower)
+			   	iLow2  = minloc(abs(p%alpha - (p%UA_BL%alphaLower + alphaMargin)), DIM=1)
+			   	iHigh2 = minloc(abs(p%alpha - (p%UA_BL%alphaUpper - alphaMargin)), DIM=1)
+			   end if
                
-               ! Ensure we have enough points
-               if (iHigh2 - iLow2 < 5) then
-                  write(*,'(A)') 'DEBUG: Still insufficient range, expanding further'
-                  iLow2 = max(1, iLow2 - 5)
-                  iHigh2 = min(p%NumAlf, iHigh2 + 5)
-               end if			   
+			   ! Ensure index safety 
+			   iLow2  = max(1, iLow2)
+			   iHigh2 = min(p%NumAlf, iHigh2)
+               
+			   ! Verify we still have enough data points for the least-squares fit
+			   if (iHigh2 - iLow2 < 4) then
+			   	iLow2  = max(1, iLow2 - 2)
+			   	iHigh2 = min(p%NumAlf, iHigh2 + 2)
+			   end if  
 			   
                call Calculate_C_alpha(p%alpha(iLow2:iHigh2), Cn(iLow2:iHigh2), p%Coefs(iLow2:iHigh2,ColCl), Default_Cn_alpha, Default_Cl_alpha, Default_alpha0, ErrStat2, ErrMsg2)
          
