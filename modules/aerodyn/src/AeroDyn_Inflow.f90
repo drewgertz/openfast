@@ -222,7 +222,7 @@ subroutine ADI_UpdateStates( t, n, u, utimes, p, x, xd, z, OtherState, m, errSta
    integer(IntKi),                  intent(in   )  :: n           !< Current simulation time step n = 0,1,...
    type(ADI_InputType),             intent(inout)  :: u(:)        !< Inputs at utimes (out only for mesh record-keeping in ExtrapInterp routine)
    real(DbKi),                      intent(in   )  :: utimes(:)   !< Times associated with u(:), in seconds
-   type(ADI_ParameterType),         intent(in   )  :: p           !< Parameters
+   type(ADI_ParameterType),         intent(inout)  :: p           !< Parameters
    type(ADI_ContinuousStateType),   intent(inout)  :: x           !< Input: Continuous states at t; Output: at t+DTaero
    type(ADI_DiscreteStateType),     intent(inout)  :: xd          !< Input: Discrete states at t;   Output: at t+DTaero
    type(ADI_ConstraintStateType),   intent(inout)  :: z           !< Input: Constraint states at t; Output: at t+DTaero
@@ -270,7 +270,7 @@ end subroutine ADI_UpdateStates
 subroutine ADI_CalcOutput(t, u, p, x, xd, z, OtherState, y, m, errStat, errMsg)
    real(DbKi),                      intent(in   )  :: t           !< Current simulation time in seconds
    type(ADI_InputType),             intent(inout)  :: u           !< Inputs at Time t  ! NOTE: set as in-out since "Inflow" needs to be set
-   type(ADI_ParameterType),         intent(in   )  :: p           !< Parameters
+   type(ADI_ParameterType),         intent(inout)  :: p           !< Parameters
    type(ADI_ContinuousStateType),   intent(in   )  :: x           !< Continuous states at t
    type(ADI_DiscreteStateType),     intent(in   )  :: xd          !< Discrete states at t
    type(ADI_ConstraintStateType),   intent(in   )  :: z           !< Constraint states at t
