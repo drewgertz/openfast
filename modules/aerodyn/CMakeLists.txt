@@ -33,6 +33,7 @@ add_library(basicaerolib STATIC
   src/UnsteadyAero_Types.f90
 
   # AirFoil Info lib
+  src/AirfoilInfo_RotCor.f90
   src/AirfoilInfo.f90
   src/AirfoilInfo_Types.f90
 )

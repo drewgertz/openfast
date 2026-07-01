@@ -4365,6 +4365,12 @@ SUBROUTINE Init_AFIparams( InputFileData, p_AFI, UnEc, RootName, ErrStat, ErrMsg
    AFI_InitInputs%AFTabMod    = InputFileData%AFTabMod !AFITable_1
    AFI_InitInputs%UAMod       = InputFileData%UA_Init%UAMod
    AFI_InitInputs%RotCorParams%RotCor       = InputFileData%RotCor
+
+   ! RotCor is only used by the BEMT path (which computes local snel factor).
+   if (AFI_InitInputs%RotCorParams%RotCor > 0 .and. InputFileData%Wake_Mod /= WakeMod_BEMT) then
+      call SetErrStat(ErrID_Warn, 'RotCor is enabled but Wake_Mod is not BEMT; disabling RotCor table precomputation.', ErrStat, ErrMsg, RoutineName)
+      AFI_InitInputs%RotCorParams%RotCor = 0
+   end if
    
       ! Call AFI_Init to read in and process the airfoil files.
       ! This includes creating the spline coefficients to be used for interpolation.
