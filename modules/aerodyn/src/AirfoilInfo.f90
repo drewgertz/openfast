@@ -1845,7 +1845,16 @@ subroutine AFI_ComputeAirfoilCoefs( AOA, Re, UserProp, p, AFI_interp, errStat, e
 
       ! These coefs are stored in the p data structures based on Re
    ! Check if rotation correction is enabled
-   UseRotCor = p%RotCorParams%RotCor > 0 .and. allocated(p%Table(1)%rotCorTables) .and. size(p%Table(1)%rotCorTables) > 0
+   UseRotCor = .false.
+   if (p%RotCorParams%RotCor > 0) then
+      if (allocated(p%Table)) then
+         if (size(p%Table) > 0) then
+            if (allocated(p%Table(1)%rotCorTables)) then
+               UseRotCor = size(p%Table(1)%rotCorTables) > 0
+            end if
+         end if
+      end if
+   end if
 
    if ( UseRotCor ) then
       ! Handle rotation correction interpolation
@@ -1903,7 +1912,16 @@ subroutine AFI_ComputeUACoefs( p, Re, UserProp, UA_BL, errMsg, errStat )
       ! These coefs are stored in the p data structures based on Re
    
    ! Check if rotation correction is enabled
-   UseRotCor = p%RotCorParams%RotCor > 0 .and. allocated(p%Table(1)%rotCorTables) .and. size(p%Table(1)%rotCorTables) > 0
+   UseRotCor = .false.
+   if (p%RotCorParams%RotCor > 0) then
+      if (allocated(p%Table)) then
+         if (size(p%Table) > 0) then
+            if (allocated(p%Table(1)%rotCorTables)) then
+               UseRotCor = size(p%Table(1)%rotCorTables) > 0
+            end if
+         end if
+      end if
+   end if
 
    if ( UseRotCor ) then
       ! Handle rotation correction interpolation
