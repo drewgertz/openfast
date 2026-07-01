@@ -2798,7 +2798,7 @@ subroutine SetInputs(t, p, p_AD, u, RotInflow, m, indx, errStat, errMsg)
 
    if (p_AD%Wake_Mod /= WakeMod_FVW) then
 
-      if (p_AD%SectAvg) then
+      if (p_AD%SectAvg .and. p_AD%Wake_Mod == WakeMod_BEMT) then
          call SetSectAvgInflow(t, p, p_AD, u, RotInflow, m, errStat2, errMsg2); call SetErrStat(errStat2, errMsg2, errStat, errMsg, RoutineName)
       endif
 
@@ -3022,6 +3022,11 @@ subroutine SetInputsForBEMT(p, p_AD, u, RotInflow, m, indx, errStat, errMsg)
    real(R8Ki)                              :: orientationBladeAzimuth(3,3,1)
    ErrStat = ErrID_None
    ErrMsg  = ""
+
+   ! Sector-averaged inflow storage is only initialized for BEMT mode.
+   if (p_AD%Wake_Mod /= WakeMod_BEMT) return
+   if (.not. allocated(m%SectAvgInflow)) return
+   if (ubound(m%SectAvgInflow, 3) < 1) return
 
       ! Get disk average values and orientations
    call DiskAvgValues(p, u, RotInflow, m, x_hat_disk, y_hat_disk, z_hat_disk, Azimuth) ! also sets m%V_diskAvg, m%V_dot_x
