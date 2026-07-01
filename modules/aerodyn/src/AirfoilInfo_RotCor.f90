@@ -358,8 +358,44 @@ subroutine AFI_ComputeAirfoilCoefsRotCor1D( AOA, p, AFI_interp, errStat, errMsg,
    
    ! Handle constant data case - similar to AFI_ComputeAirfoilCoefs1D
    if (p%Table(iTable)%ConstData) then
-      ! For constant data, use the regular 1D routine
-      call AFI_ComputeAirfoilCoefs1D( AOA, p, AFI_interp, errStat, errMsg, iTable )
+      ! For constant data, use the precomputed RotCor table directly.
+      if (allocated(p%Table(iTable)%rotCorTables) .and. size(p%Table(iTable)%rotCorTables) > 0) then
+         call AFI_ComputeAirfoilCoefsFromRotCorTable( AOA, p%Table(iTable)%rotCorTables(1), p, AFI_interp, errStat, errMsg )
+      else
+         ! Defensive fallback in case precomputed tables are unavailable.
+         AFI_interp%Cl = p%Table(iTable)%Coefs(1,p%ColCl)
+         AFI_interp%Cd = p%Table(iTable)%Coefs(1,p%ColCd)
+
+         if ( p%ColCm > 0 ) then
+            AFI_interp%Cm = p%Table(iTable)%Coefs(1,p%ColCm)
+         else
+            AFI_interp%Cm = 0.0_ReKi
+         end if
+
+         if ( p%ColCpmin > 0 ) then
+            AFI_interp%Cpmin = p%Table(iTable)%Coefs(1,p%ColCpmin)
+         else
+            AFI_interp%Cpmin = 0.0_ReKi
+         end if
+
+         if ( p%ColUAf > 0 ) then
+            AFI_interp%f_st          = p%Table(iTable)%Coefs(1,p%ColUAf)
+            AFI_interp%fullySeparate = p%Table(iTable)%Coefs(1,p%ColUAf+1)
+            AFI_interp%fullyAttached = p%Table(iTable)%Coefs(1,p%ColUAf+2)
+         else
+            AFI_interp%f_st          = 0.0_ReKi
+            AFI_interp%fullySeparate = 0.0_ReKi
+            AFI_interp%fullyAttached = 0.0_ReKi
+         end if
+
+         if (p%Table(iTable)%InclUAdata) then
+            AFI_interp%Cd0 = p%Table(iTable)%UA_BL%Cd0
+            AFI_interp%Cm0 = p%Table(iTable)%UA_BL%Cm0
+         else
+            AFI_interp%Cd0 = 0.0_ReKi
+            AFI_interp%Cm0 = 0.0_ReKi
+         end if
+      end if
       return
    end if
    
@@ -419,8 +455,8 @@ subroutine AFI_ComputeAirfoilCoefsRotCor2D( AOA, SecondProp, p, AFI_interp, errS
    
    ! Handle constant data case - similar to AFI_ComputeAirfoilCoefs1D
    if (p%Table(1)%ConstData) then
-      ! For constant data, use the regular 2D routine
-      call AFI_ComputeAirfoilCoefs2D( AOA, SecondProp, p, AFI_interp, errStat, errMsg )
+      ! For constant data, use RotCor interpolation with the sole precomputed table.
+      call AFI_Compute2DInterpolationRotCor( AOA, SecondProp, p, 1_IntKi, AFI_interp, errStat, errMsg )
       return
    end if
    
