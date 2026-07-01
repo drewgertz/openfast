@@ -1067,20 +1067,6 @@ ALPHA_LOOP: DO Row=1,p%Table(iTable)%NumAlf-1
             !------------------------------------
             
             if (CalcDefaults%C_nalpha .or. CalcDefaults%C_lalpha .or. CalcDefaults%alpha0) then
-               
-               alphaMargin = 0.2*( p%UA_BL%alphaUpper - p%UA_BL%alphaLower );
-               !mask = p%alpha >= p%UA_BL%alphaLower+alphaMargin & p%alpha <= p%UA_BL%alphaUpper-alphaMargin;
-            
-               iLow2 = iLowLimit
-               do while (iLow2 < iHighLimit-1 .and. p%alpha(iLow2) <  p%UA_BL%alphaLower + alphaMargin) 
-                  iLow2 = iLow2 + 1
-               end do
-
-               iHigh2 = iHighLimit
-               do while (iHigh2 > iLow2+1 .and. p%alpha(iHigh2) >  p%UA_BL%alphaUpper - alphaMargin) 
-                  iHigh2 = iHigh2 - 1
-               end do
-
                ! Override problematic UA bounds for better linear region detection
                if (abs(p%UA_BL%alphaUpper - p%UA_BL%alphaLower) < 2.0_ReKi * D2R) then
                   ! If the detected range is too narrow, use a reasonable fixed range
@@ -1088,9 +1074,6 @@ ALPHA_LOOP: DO Row=1,p%Table(iTable)%NumAlf-1
                   p%UA_BL%alphaUpper =  10.0_ReKi * D2R
                   !write(*,'(A)') 'DEBUG: Overriding narrow UA bounds with -5° to +10°'
                end if
-               
-               ! Force a reasonable margin regardless of the bounds
-               alphaMargin = max(1.0_ReKi * D2R, 0.1_ReKi * (p%UA_BL%alphaUpper - p%UA_BL%alphaLower))
                
                ! Ensure we get at least -5° to +5° range for Calculate_C_alpha
                iLow2 = 1
