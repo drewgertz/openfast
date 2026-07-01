@@ -14,6 +14,7 @@ MODULE AirfoilInfo_RotCor
    PUBLIC                                       :: AFI_ComputeUACoefsRotCor1D
    PUBLIC                                       :: AFI_ComputeUACoefsRotCor2D
    PUBLIC                                       :: AFI_CalcSnel
+   PUBLIC                                       :: AFI_ApplySnelPointCorrection
 
    integer, parameter                           :: MaxNumAFCoeffs = 7 !cl,cd,cm,cpMin, UA:f_st, FullySeparate, FullyAttached
 
@@ -296,8 +297,8 @@ subroutine AFI_ComputeAirfoilCoefsFromRotCorTable( AOA, RotCorTable, p, AFI_inte
       call MPi2Pi ( Alpha ) ! change AOA into range of -pi to pi
       
       ! Spline interpolation based on requested AOA
-      IntAFCoefs(1:s1) = CubicSplineInterpM( Alpha, RotCorTable%Alpha, RotCorTable%Coefs, &
-                                             RotCorTable%SplineCoefs, ErrStat, ErrMsg )
+      call CubicSplineInterpM( Alpha, RotCorTable%Alpha, RotCorTable%Coefs, &
+                   RotCorTable%SplineCoefs, IntAFCoefs(1:s1) )
    end if
   
    AFI_interp%Cl    = IntAFCoefs(p%ColCl)
@@ -894,6 +895,58 @@ subroutine AFI_CalcSnel(AFInfo, snel_factor)
    end if    
    
 end subroutine AFI_CalcSnel
+!----------------------------------------------------------------------------------------------------------------------------------
+subroutine AFI_ApplySnelPointCorrection(AOA, p, iTable, AFI_interp, errStat, errMsg)
+   implicit none
+
+   real(ReKi),               intent(in   ) :: AOA
+   type(AFI_ParameterType),  intent(in   ) :: p
+   integer(IntKi),           intent(in   ) :: iTable
+   type(AFI_OutputType),     intent(inout) :: AFI_interp
+   integer(IntKi),           intent(  out) :: errStat
+   character(*),             intent(  out) :: errMsg
+
+   integer(IntKi)                         :: iLo
+   real(ReKi)                             :: alphaWrapped
+   real(ReKi)                             :: alphaDeg
+   real(ReKi)                             :: cl0
+   real(ReKi)                             :: clLin
+   real(ReKi)                             :: g
+   real(ReKi)                             :: slope
+   real(ReKi)                             :: snelFactor
+
+   errStat = ErrID_None
+   errMsg  = ''
+
+   if (p%RotCorParams%RotCor <= 0) return
+   if (p%RotCorParams%RotCor /= 1) return
+   if (iTable < 1 .or. iTable > p%NumTabs) return
+
+   if (.not. allocated(p%Table(iTable)%Alpha)) return
+   if (.not. allocated(p%Table(iTable)%Coefs)) return
+   if (size(p%Table(iTable)%Alpha) < 1) return
+
+   slope = p%Table(iTable)%UA_BL%C_lalpha
+   snelFactor = p%RotCorParams%current_snel_factor
+
+   alphaWrapped = AOA
+   call MPi2Pi(alphaWrapped)
+   alphaDeg = alphaWrapped * R2D
+
+   iLo = 0
+   cl0 = InterpBinReal(0.0_ReKi, p%Table(iTable)%Alpha, p%Table(iTable)%Coefs(:, p%ColCl), iLo, size(p%Table(iTable)%Alpha))
+   clLin = slope * alphaWrapped + cl0
+
+   g = 0.0_ReKi
+   if (alphaDeg > 0.0_ReKi .and. alphaDeg < 30.0_ReKi) then
+      g = 1.0_ReKi
+   else if (alphaDeg >= 30.0_ReKi .and. alphaDeg < 60.0_ReKi) then
+      g = 0.5_ReKi * (1.0_ReKi + cos(D2R * (6.0_ReKi * alphaDeg - 180.0_ReKi)))
+   end if
+
+   AFI_interp%Cl = AFI_interp%Cl + snelFactor * g * (clLin - AFI_interp%Cl)
+
+end subroutine AFI_ApplySnelPointCorrection
 !----------------------------------------------------------------------------------------------------------------------------------
 subroutine AFI_ApplySnel(AOA_vec, Cl_vec, snel_factor, Cl_0, slope)
     implicit none

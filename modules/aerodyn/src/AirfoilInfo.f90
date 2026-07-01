@@ -30,7 +30,8 @@ MODULE AirfoilInfo
                                                                                 AFI_ComputeAirfoilCoefsRotCor2D_Impl => AFI_ComputeAirfoilCoefsRotCor2D, &
                                                                                 AFI_ComputeUACoefsRotCor1D_Impl => AFI_ComputeUACoefsRotCor1D, &
                                                                                 AFI_ComputeUACoefsRotCor2D_Impl => AFI_ComputeUACoefsRotCor2D, &
-                                                                                AFI_CalcSnel_Impl => AFI_CalcSnel
+                                                                                AFI_CalcSnel_Impl => AFI_CalcSnel, &
+                                                                                AFI_ApplySnelPointCorrection_Impl => AFI_ApplySnelPointCorrection
    USE                                          :: ISO_FORTRAN_ENV , ONLY : IOSTAT_EOR
    USE                                          :: NWTC_LAPACK
    USE 											:: NWTC_Library_Types
@@ -1858,13 +1859,23 @@ subroutine AFI_ComputeAirfoilCoefs( AOA, Re, UserProp, p, AFI_interp, errStat, e
    character(*),             intent(  out) :: errMsg                     ! Error message if ErrStat /= ErrID_None 
 
    real(ReKi)                              :: ReInterp
+   integer(IntKi)                          :: ErrStat2
+   character(ErrMsgLen)                    :: ErrMsg2
 
       ! These coefs are stored in the p data structures based on Re
    ! Check if rotation correction is enabled
    if ( p%RotCorParams%RotCor > 0 ) then
       ! Handle rotation correction interpolation
       if ( p%AFTabMod == AFITable_1 ) then 
-         call AFI_ComputeAirfoilCoefsRotCor1D( AOA, p, AFI_interp, errStat, errMsg, 1 )
+         if (p%RotCorParams%RotCor == 1) then
+            call AFI_ComputeAirfoilCoefs1D( AOA, p, AFI_interp, errStat, errMsg, 1 )
+            if (errStat < AbortErrLev) then
+               call AFI_ApplySnelPointCorrection_Impl( AOA, p, 1, AFI_interp, ErrStat2, ErrMsg2 )
+               call SetErrStat(ErrStat2, ErrMsg2, errStat, errMsg, 'AFI_ComputeAirfoilCoefs')
+            end if
+         else
+            call AFI_ComputeAirfoilCoefsRotCor1D( AOA, p, AFI_interp, errStat, errMsg, 1 )
+         end if
       elseif ( p%AFTabMod == AFITable_2Re ) then
 #ifndef AFI_USE_LINEAR_RE
          ReInterp = log( Re )
