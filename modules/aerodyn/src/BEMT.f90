@@ -977,7 +977,7 @@ subroutine BEMT_UpdateStates( t, n, u, utimes, p, x, xd, z, OtherState, AFInfo, 
       !...............................................................................................................................  
       do j = 1,p%numBlades
          do i = 1,p%numBladeNodes
-          if (AFInfo(p%AFindx(i,j))%RotCorParams%RotCor > 0) call BEMT_calcSnel(AFInfo(p%AFindx(i,j)), p, u(2), i, j) ! u(2) is time t+dt
+          if (p%useInduction) call BEMT_calcSnel(AFInfo(p%AFindx(i,j)), p, u(2), i, j) ! u(2) is time t+dt
                ! COMPUTE: x%UA and/or xd%UA, OtherState%UA
             call UA_UpdateStates( i, j, t, n, m%u_UA(i,j,:), uTimes, p%UA, x%UA, xd%UA, OtherState%UA, AFInfo(p%AFIndx(i,j)), m%UA, errStat2, errMsg2 )
                if (ErrStat2 /= ErrID_None) then
@@ -1075,7 +1075,7 @@ subroutine UpdatePhi( u, p, phi, AFInfo, m, ValidPhi, errStat, errMsg )
          
          do j = 1,p%numBlades ! Loop through all blades
             do i = 1,p%numBladeNodes ! Loop through the blade nodes / elements
-               if (AFInfo(p%AFindx(i,j))%RotCorParams%RotCor > 0) call BEMT_calcSnel(AFInfo(p%AFindx(i,j)), p, u, i, j)
+               if (p%useInduction) call BEMT_calcSnel(AFInfo(p%AFindx(i,j)), p, u, i, j)
                call BEMT_UnCoupledSolve(p, u, i, j, phi(i,j), AFInfo(p%AFIndx(i,j)), &
                                         ValidPhi(i,j), m%FirstWarn_Phi,errStat2, errMsg2)
 
@@ -1158,7 +1158,7 @@ subroutine calculate_Inductions_from_BEMT(p,phi,u,OtherState,AFInfo,axInduction,
       
             ! Need to get the induction factors for these conditions without skewed wake correction and without UA
             ! COMPUTE: axInduction, tanInduction  
-		    if (AFInfo(p%AFindx(i,j))%RotCorParams%RotCor > 0) call BEMT_calcSnel(AFInfo(p%AFindx(i,j)), p, u, i, j)
+          if (p%useInduction) call BEMT_calcSnel(AFInfo(p%AFindx(i,j)), p, u, i, j)
             fzero = BEMTU_InductionWithResidual(p, u, i, j, phi(i,j), AFInfo(p%AFIndx(i,j)), IsValidSolution, ErrStat2, ErrMsg2, a=axInduction(i,j), ap=tanInduction(i,j), kp_out=kp, k_out=k, F_out=F)
             if (present(kp_out)) kp_out(i,j) = kp
             if (present(k_out))  k_out(i,j)  = k
@@ -1348,7 +1348,7 @@ subroutine BEMT_CalcOutput( t, u, p, x, xd, z, OtherState, AFInfo, y, m, errStat
 
       do j = 1,p%numBlades ! Loop through all blades
          do i = 1,p%numBladeNodes ! Loop through the blade nodes / elements		 
-	     if (AFInfo(p%AFindx(i,j))%RotCorParams%RotCor > 0) call BEMT_calcSnel(AFInfo(p%AFindx(i,j)), p, u, i, j)
+        if (p%useInduction) call BEMT_calcSnel(AFInfo(p%AFindx(i,j)), p, u, i, j)
 		 call UA_CalcOutput(i, j, t, m%u_UA(i,j,InputIndex), p%UA, x%UA, xd%UA, OtherState%UA, AFInfo(p%AFindx(i,j)), m%y_UA, m%UA, errStat2, errMsg2)
          if (ErrStat2 /= ErrID_None) then
             call SetErrStat(ErrStat2,ErrMsg2,ErrStat,ErrMsg,RoutineName//trim(NodeText(i,j)))
@@ -1370,7 +1370,7 @@ subroutine BEMT_CalcOutput( t, u, p, x, xd, z, OtherState, AFInfo, y, m, errStat
             ! compute steady Airfoil Coefs
       do j = 1,p%numBlades ! Loop through all blades
          do i = 1,p%numBladeNodes ! Loop through the blade nodes / elements
-          if (AFInfo(p%Afindx(i,j))%RotCorParams%RotCor > 0) call BEMT_calcSnel(AFInfo(p%Afindx(i,j)), p, u, i, j)
+          if (p%useInduction) call BEMT_calcSnel(AFInfo(p%Afindx(i,j)), p, u, i, j)
 			call AFI_ComputeAirfoilCoefs( y%AOA(i,j), y%Re(i,j), u%UserProp(i,j), AFInfo(p%AFindx(i,j)), AFI_interp, errStat2, errMsg2)		
 			
             if (ErrStat2 /= ErrID_None) then
@@ -1762,7 +1762,7 @@ subroutine BEMT_CalcContStateDeriv( t, u, p, x, xd, z, OtherState, m, dxdt, AFIn
       
       do j = 1,p%numBlades
          do i = 1,p%numBladeNodes
-		    if (AFInfo(p%AFindx(i,j))%RotCorParams%RotCor > 0) call BEMT_calcSnel(AFInfo(p%AFindx(i,j)), p, u, i, j)
+          if (p%useInduction) call BEMT_calcSnel(AFInfo(p%AFindx(i,j)), p, u, i, j)
             call UA_CalcContStateDeriv( i, j, t, m%u_UA(i,j,InputIndex), p%UA, x%UA%element(i,j), OtherState%UA, AFInfo(p%AFIndx(i,j)), m%UA, dxdt%UA%element(i,j), ErrStat2, ErrMsg2 )
          end do
       end do
@@ -1850,7 +1850,7 @@ subroutine BEMT_CalcConstrStateResidual( Time, u, p, x, xd, z, OtherState, m, z_
             do i = 1,p%numBladeNodes
          
                   ! Solve for the constraint states here:
-      			   if (AFInfo(p%AFindx(i,j))%RotCorParams%RotCor > 0) call BEMT_calcSnel(AFInfo(p%AFindx(i,j)), p, u, i, j)
+                  if (p%useInduction) call BEMT_calcSnel(AFInfo(p%AFindx(i,j)), p, u, i, j)
                Z_residual%phi(i,j) = BEMTU_InductionWithResidual(p, u, i, j, z%phi(i,j), AFInfo(p%AFindx(i,j)), IsValidSolution, ErrStat2, ErrMsg2)
                call SetErrStat(ErrStat2,ErrMsg2,ErrStat,ErrMsg,RoutineName)
                if (ErrStat >= AbortErrLev) return                  

@@ -404,7 +404,7 @@ real(ReKi) function BEMTU_InductionWithResidual(p, u, i, j, phi, AFInfo, IsValid
    ! FIX ME: Note that the Re used here is computed assuming axInduction and tanInduction are 0. Is that a problem for 2D Re interpolation on airfoils? or should update solve method to take this into account?
       call GetReynoldsNumber(p%BEM_Mod, 0.0_ReKi, 0.0_ReKi, u%Vx(i,j), u%Vy(i,j), u%Vz(i,j), p%chord(i,j), p%kinVisc, u%theta(i,j), phi, u%cantAngle(i,j), u%toeAngle(i,j),  Re)
 
-      if (AFInfo%RotCorParams%RotCor > 0) call BEMT_calcSnel(AFInfo, p, u, i, j)
+      if (p%useInduction) call BEMT_calcSnel(AFInfo, p, u, i, j)
       call AFI_ComputeAirfoilCoefs( AOA, Re, u%UserProp(i,j),  AFInfo, AFI_interp, errStat2, errMsg2 )  
 	  
          call SetErrStat( errStat2, errMsg2, errStat, errMsg, RoutineName ) 
@@ -468,7 +468,7 @@ subroutine BEMT_CalcSnel(AFInfo, p, u, i, j)
    real(ReKi)                                     :: snel_factor  
 
    ! RotCor bookkeeping is only required when rotational correction is enabled.
-   if (AFInfo%RotCorParams%RotCor <= 0) then
+   if (.not. p%useInduction .or. AFInfo%RotCorParams%RotCor <= 0) then
       AFInfo%RotCorParams%current_snel_factor = 0.0_ReKi
       return
    end if
