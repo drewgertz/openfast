@@ -467,6 +467,12 @@ subroutine BEMT_CalcSnel(AFInfo, p, u, i, j)
    integer(IntKi),                 intent(in   )  :: i, j     
    real(ReKi)                                     :: snel_factor  
 
+   ! RotCor bookkeeping is only required when rotational correction is enabled.
+   if (AFInfo%RotCorParams%RotCor <= 0) then
+      AFInfo%RotCorParams%current_snel_factor = 0.0_ReKi
+      return
+   end if
+
    ! Set up the rotational correction parameters on the temporary copy.
    AFInfo%RotCorParams%tsr     = abs(u%TSR)
    AFInfo%RotCorParams%rLocal  = u%rLocal(i,j)

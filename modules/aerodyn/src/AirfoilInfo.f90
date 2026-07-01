@@ -1841,10 +1841,13 @@ subroutine AFI_ComputeAirfoilCoefs( AOA, Re, UserProp, p, AFI_interp, errStat, e
    character(*),             intent(  out) :: errMsg                     ! Error message if ErrStat /= ErrID_None 
 
    real(ReKi)                              :: ReInterp
+   logical                                 :: UseRotCor
 
       ! These coefs are stored in the p data structures based on Re
    ! Check if rotation correction is enabled
-   if ( p%RotCorParams%RotCor > 0 ) then
+   UseRotCor = p%RotCorParams%RotCor > 0 .and. allocated(p%Table(1)%rotCorTables) .and. size(p%Table(1)%rotCorTables) > 0
+
+   if ( UseRotCor ) then
       ! Handle rotation correction interpolation
       if ( p%AFTabMod == AFITable_1 ) then 
          call AFI_ComputeAirfoilCoefsRotCor1D( AOA, p, AFI_interp, errStat, errMsg, 1 )
@@ -1894,12 +1897,15 @@ subroutine AFI_ComputeUACoefs( p, Re, UserProp, UA_BL, errMsg, errStat )
    character(*),            intent(  out) :: errMsg                        !< Error message
 
    real(ReKi)                             :: ReInterp
+   logical                                :: UseRotCor
    
 
       ! These coefs are stored in the p data structures based on Re
    
    ! Check if rotation correction is enabled
-   if ( p%RotCorParams%RotCor > 0 ) then
+   UseRotCor = p%RotCorParams%RotCor > 0 .and. allocated(p%Table(1)%rotCorTables) .and. size(p%Table(1)%rotCorTables) > 0
+
+   if ( UseRotCor ) then
       ! Handle rotation correction interpolation
       if ( p%AFTabMod == AFITable_1 ) then 
          call AFI_ComputeUACoefsRotCor1D( p, UA_BL, errStat, errMsg )
