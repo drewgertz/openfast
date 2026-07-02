@@ -25,8 +25,15 @@ MODULE AirfoilInfo
 ! Redo this routing to get rid of some of the phases.  For instance, AFI_Init should be calle directly.
 
    USE                                             AirfoilInfo_Types
+   USE                                             AirfoilInfo_RotCor, ONLY : AFI_PreCalcRotCorTables_Impl => AFI_PreCalcRotCorTables, &
+                                                                                AFI_ComputeAirfoilCoefsRotCor1D_Impl => AFI_ComputeAirfoilCoefsRotCor1D, &
+                                                                                AFI_ComputeAirfoilCoefsRotCor2D_Impl => AFI_ComputeAirfoilCoefsRotCor2D, &
+                                                                                AFI_ComputeUACoefsRotCor1D_Impl => AFI_ComputeUACoefsRotCor1D, &
+                                                                                AFI_ComputeUACoefsRotCor2D_Impl => AFI_ComputeUACoefsRotCor2D, &
+                                                                                AFI_CalcSnel_Impl => AFI_CalcSnel
    USE                                          :: ISO_FORTRAN_ENV , ONLY : IOSTAT_EOR
    USE                                          :: NWTC_LAPACK
+   USE 											:: NWTC_Library_Types
 
    IMPLICIT NONE
 
@@ -38,6 +45,7 @@ MODULE AirfoilInfo
    PUBLIC                                       :: AFI_WrHeader
    PUBLIC                                       :: AFI_WrData
    PUBLIC                                       :: AFI_WrTables
+   PUBLIC                                       :: AFI_CalcSnel
 
    TYPE(ProgDesc), PARAMETER                    :: AFI_Ver = ProgDesc( 'AirfoilInfo', '', '')    ! The name, version, and date of AirfoilInfo.
 
@@ -119,6 +127,9 @@ CONTAINS
              
          ! Set the lookup model:  1 = 1D, 2 = 2D based on (AoA,Re), 3 = 2D based on (AoA,UserProp)
       p%AFTabMod   = InitInput%AFTabMod
+         ! Set the rotor correction params 
+      p%RotCorParams   = InitInput%RotCorParams
+	  p%RotCorParams%UAMod   = InitInput%UAMod
       
          ! Set the column indices for the various airfoil coefficients as they will be stored in our data structures, 
          !   NOT as they are recorded in the airfoil input file (InitInput%InCol_*) !
@@ -793,6 +804,12 @@ ALPHA_LOOP: DO Row=1,p%Table(iTable)%NumAlf-1
                   'Airfoil data should go from -180 degrees to 180 degrees and the coefficients at the ends should be the same.', ErrStat, ErrMsg, RoutineName )
             ENDIF
          end if
+		 
+         ! Pre-calculate rotationally corrected tables
+		 if (p%RotCorParams%RotCor>0) then
+            call AFI_PreCalcRotCorTables(p, iTable, InitInp, ErrStat, ErrMsg, RoutineName)
+		 end if
+		 
       ENDDO ! iTable
 
 
@@ -1050,20 +1067,40 @@ ALPHA_LOOP: DO Row=1,p%Table(iTable)%NumAlf-1
             !------------------------------------
             
             if (CalcDefaults%C_nalpha .or. CalcDefaults%C_lalpha .or. CalcDefaults%alpha0) then
+               ! Override problematic UA bounds for better linear region detection
+               if (abs(p%UA_BL%alphaUpper - p%UA_BL%alphaLower) < 2.0_ReKi * D2R) then
+                  ! If the detected range is too narrow, use a reasonable fixed range
+                  p%UA_BL%alphaLower = -5.0_ReKi * D2R
+                  p%UA_BL%alphaUpper =  10.0_ReKi * D2R
+                  !write(*,'(A)') 'DEBUG: Overriding narrow UA bounds with -5° to +10°'
+               end if
                
-               alphaMargin = 0.2*( p%UA_BL%alphaUpper - p%UA_BL%alphaLower );
-               !mask = p%alpha >= p%UA_BL%alphaLower+alphaMargin & p%alpha <= p%UA_BL%alphaUpper-alphaMargin;
-            
-               iLow2 = iLowLimit
-               do while (iLow2 < iHighLimit-1 .and. p%alpha(iLow2) <  p%UA_BL%alphaLower + alphaMargin) 
-                  iLow2 = iLow2 + 1
-               end do
+               ! Ensure we get at least -5° to +5° range for Calculate_C_alpha
+               iLow2 = 1
+               iHigh2 = p%NumAlf
 
-               iHigh2 = iHighLimit
-               do while (iHigh2 > iLow2+1 .and. p%alpha(iHigh2) >  p%UA_BL%alphaUpper - alphaMargin) 
-                  iHigh2 = iHigh2 - 1
-               end do
-
+			   ! Use the automatically detected bounds unless they are physically unreasonable
+			   if (abs(p%UA_BL%alphaUpper - p%UA_BL%alphaLower) < 2.0_ReKi * D2R) then
+			   	! FALLBACK: Only if detection fails, use a safe default range relative to zero-lift
+			   	iLow2  = minloc(abs(p%alpha - (-5.0_ReKi * D2R)), DIM=1)
+			   	iHigh2 = minloc(abs(p%alpha - ( 5.0_ReKi * D2R)), DIM=1)
+			   else
+			   	! STANDARD: Use the detected bounds with a 10% safety margin to ensure linearity
+			   	alphaMargin = 0.1_ReKi * (p%UA_BL%alphaUpper - p%UA_BL%alphaLower)
+			   	iLow2  = minloc(abs(p%alpha - (p%UA_BL%alphaLower + alphaMargin)), DIM=1)
+			   	iHigh2 = minloc(abs(p%alpha - (p%UA_BL%alphaUpper - alphaMargin)), DIM=1)
+			   end if
+               
+			   ! Ensure index safety 
+			   iLow2  = max(1, iLow2)
+			   iHigh2 = min(p%NumAlf, iHigh2)
+               
+			   ! Verify we still have enough data points for the least-squares fit
+			   if (iHigh2 - iLow2 < 4) then
+			   	iLow2  = max(1, iLow2 - 2)
+			   	iHigh2 = min(p%NumAlf, iHigh2 + 2)
+			   end if  
+			   
                call Calculate_C_alpha(p%alpha(iLow2:iHigh2), Cn(iLow2:iHigh2), p%Coefs(iLow2:iHigh2,ColCl), Default_Cn_alpha, Default_Cl_alpha, Default_alpha0, ErrStat2, ErrMsg2)
          
                if (CalcDefaults%C_nalpha) p%UA_BL%C_nalpha = Default_Cn_alpha
@@ -1767,6 +1804,7 @@ subroutine AFI_ComputeAirfoilCoefs1D( AOA, p, AFI_interp, errStat, errMsg, Table
       AFI_interp%f_st          = IntAFCoefs(p%ColUAf)   ! separation function
       AFI_interp%fullySeparate = IntAFCoefs(p%ColUAf+1) ! fully separated cn or cl
       AFI_interp%fullyAttached = IntAFCoefs(p%ColUAf+2) ! fully attached cn or cl
+
    else
       AFI_interp%f_st          = 0.0_ReKi
       AFI_interp%fullySeparate = 0.0_ReKi
@@ -1798,20 +1836,41 @@ subroutine AFI_ComputeAirfoilCoefs( AOA, Re, UserProp, p, AFI_interp, errStat, e
    character(*),             intent(  out) :: errMsg                     ! Error message if ErrStat /= ErrID_None 
 
    real(ReKi)                              :: ReInterp
+   logical                                 :: UseRotCor
 
       ! These coefs are stored in the p data structures based on Re
-   
-   if ( p%AFTabMod == AFITable_1 ) then 
-      call AFI_ComputeAirfoilCoefs1D( AOA, p, AFI_interp, errStat, errMsg, 1 )
-   elseif ( p%AFTabMod == AFITable_2Re ) then
+   ! Check if rotation correction is enabled
+   UseRotCor = p%RotCorParams%RotCor > 0 .and. allocated(p%Table(1)%rotCorTables) .and. size(p%Table(1)%rotCorTables) > 0
+
+   if ( UseRotCor ) then
+      ! Handle rotation correction interpolation
+      if ( p%AFTabMod == AFITable_1 ) then 
+         call AFI_ComputeAirfoilCoefsRotCor1D( AOA, p, AFI_interp, errStat, errMsg, 1 )
+      elseif ( p%AFTabMod == AFITable_2Re ) then
 #ifndef AFI_USE_LINEAR_RE
-      ReInterp = log( Re )
+         ReInterp = log( Re )
 #else
-      ReInterp =      Re
+         ReInterp =      Re
 #endif
-      call AFI_ComputeAirfoilCoefs2D( AOA, ReInterp, p, AFI_interp, errStat, errMsg )
-   else !if ( p%AFTabMod == AFITable_2User ) then
-      call AFI_ComputeAirfoilCoefs2D( AOA, UserProp, p, AFI_interp, errStat, errMsg )
+         call AFI_ComputeAirfoilCoefsRotCor2D( AOA, ReInterp, p, AFI_interp, errStat, errMsg )
+      else !if ( p%AFTabMod == AFITable_2User ) then
+         call AFI_ComputeAirfoilCoefsRotCor2D( AOA, UserProp, p, AFI_interp, errStat, errMsg )
+      end if
+
+   else
+      ! Original logic without rotation correction
+      if ( p%AFTabMod == AFITable_1 ) then 	     
+         call AFI_ComputeAirfoilCoefs1D( AOA, p, AFI_interp, errStat, errMsg, 1 )
+      elseif ( p%AFTabMod == AFITable_2Re ) then
+#ifndef AFI_USE_LINEAR_RE
+         ReInterp = log( Re )
+#else
+         ReInterp =      Re
+#endif
+         call AFI_ComputeAirfoilCoefs2D( AOA, ReInterp, p, AFI_interp, errStat, errMsg )
+      else !if ( p%AFTabMod == AFITable_2User ) then
+         call AFI_ComputeAirfoilCoefs2D( AOA, UserProp, p, AFI_interp, errStat, errMsg )
+      end if
    end if
    
    ! put some limits on the separation function:
@@ -1833,24 +1892,46 @@ subroutine AFI_ComputeUACoefs( p, Re, UserProp, UA_BL, errMsg, errStat )
    character(*),            intent(  out) :: errMsg                        !< Error message
 
    real(ReKi)                             :: ReInterp
+   logical                                :: UseRotCor
    
 
       ! These coefs are stored in the p data structures based on Re
    
-   if ( p%AFTabMod == AFITable_1 ) then 
-      call AFI_CopyUA_BL_Type( p%Table(1)%UA_BL, UA_BL, MESH_NEWCOPY, errStat, errMsg )  ! this doesn't have a mesh, so the control code is irrelevant
-      return
-   elseif ( p%AFTabMod == AFITable_2Re ) then
+   ! Check if rotation correction is enabled
+   UseRotCor = p%RotCorParams%RotCor > 0 .and. allocated(p%Table(1)%rotCorTables) .and. size(p%Table(1)%rotCorTables) > 0
+
+   if ( UseRotCor ) then
+      ! Handle rotation correction interpolation
+      if ( p%AFTabMod == AFITable_1 ) then 
+         call AFI_ComputeUACoefsRotCor1D( p, UA_BL, errStat, errMsg )
+         return
+      elseif ( p%AFTabMod == AFITable_2Re ) then
 #ifndef AFI_USE_LINEAR_RE
-      ReInterp = log( Re )
+         ReInterp = log( Re )
 #else
-      ReInterp =      Re
+         ReInterp =      Re
 #endif
-      call AFI_ComputeUACoefs2D( ReInterp, p, UA_BL, errStat, errMsg )
-   else !if ( p%AFTabMod == AFITable_2User ) then
-      call AFI_ComputeUACoefs2D( UserProp, p, UA_BL, errStat, errMsg )
+         call AFI_ComputeUACoefsRotCor2D( ReInterp, p, UA_BL, errStat, errMsg )
+      else !if ( p%AFTabMod == AFITable_2User ) then
+         call AFI_ComputeUACoefsRotCor2D( UserProp, p, UA_BL, errStat, errMsg )
+      end if
+   else
+      ! Original logic without rotation correction
+      if ( p%AFTabMod == AFITable_1 ) then 
+         call AFI_CopyUA_BL_Type( p%Table(1)%UA_BL, UA_BL, MESH_NEWCOPY, errStat, errMsg )  ! this doesn't have a mesh, so the control code is irrelevant
+         return
+      elseif ( p%AFTabMod == AFITable_2Re ) then
+#ifndef AFI_USE_LINEAR_RE
+         ReInterp = log( Re )
+#else
+         ReInterp =      Re
+#endif
+         call AFI_ComputeUACoefs2D( ReInterp, p, UA_BL, errStat, errMsg )
+      else !if ( p%AFTabMod == AFITable_2User ) then
+         call AFI_ComputeUACoefs2D( UserProp, p, UA_BL, errStat, errMsg )
+      end if
    end if
-   
+     
    call MPi2Pi( UA_BL%alpha0 )
    call MPi2Pi( UA_BL%alpha1 )
    call MPi2Pi( UA_BL%alpha2 )
@@ -1858,7 +1939,6 @@ subroutine AFI_ComputeUACoefs( p, Re, UserProp, UA_BL, errMsg, errStat )
    ! Cn1=1.9 Tp=1.7 Tf=3., Tv=6 Tvl=11, Cd0=0.012
    
 end subroutine AFI_ComputeUACoefs
-
 !=============================================================================
 subroutine AFI_WrHeader(delim, FileName, unOutFile, ErrStat, ErrMsg)
 
@@ -2165,6 +2245,77 @@ subroutine AFI_WrTables(AFI_Params,UAMod,OutRootName)
    enddo
 
 end subroutine AFI_WrTables
+!================= FUNCTIONS FOR ROTATIONAL CORRECTION ===========================
+SUBROUTINE AFI_PreCalcRotCorTables(p, iTable, InitInp, ErrStat, ErrMsg, RoutineName)
+
+   TYPE (AFI_ParameterType), INTENT(INOUT)    :: p
+   INTEGER(IntKi),           INTENT(IN   )    :: iTable
+   TYPE (AFI_InitInputType), INTENT(IN   )    :: InitInp
+   INTEGER(IntKi),           INTENT(OUT)      :: ErrStat
+   CHARACTER(*),             INTENT(OUT)      :: ErrMsg
+   CHARACTER(*),             INTENT(IN   )    :: RoutineName
+
+   call AFI_PreCalcRotCorTables_Impl(p, iTable, InitInp, ErrStat, ErrMsg, RoutineName, CalculateUACoeffs)
+
+END SUBROUTINE AFI_PreCalcRotCorTables
+!----------------------------------------------------------------------------------------------------------------------------------
+subroutine AFI_ComputeAirfoilCoefsRotCor1D( AOA, p, AFI_interp, errStat, errMsg, iTable )
+
+   real(ReKi),                             intent(in   ) :: AOA
+   TYPE (AFI_ParameterType),               intent(in   ) :: p
+   type(AFI_OutputType),                   intent(  out) :: AFI_interp
+   integer(IntKi),                         intent(  out) :: errStat
+   character(*),                           intent(  out) :: errMsg
+   integer(IntKi),                         intent(in   ) :: iTable
+
+   call AFI_ComputeAirfoilCoefsRotCor1D_Impl( AOA, p, AFI_interp, errStat, errMsg, iTable )
+
+end subroutine AFI_ComputeAirfoilCoefsRotCor1D
+!----------------------------------------------------------------------------------------------------------------------------------
+subroutine AFI_ComputeAirfoilCoefsRotCor2D( AOA, SecondProp, p, AFI_interp, errStat, errMsg )
+
+   real(ReKi),                             intent(in   ) :: AOA
+   real(ReKi),                             intent(in   ) :: SecondProp
+   TYPE (AFI_ParameterType),               intent(in   ) :: p
+   type(AFI_OutputType),                   intent(  out) :: AFI_interp
+   integer(IntKi),                         intent(  out) :: errStat
+   character(*),                           intent(  out) :: errMsg
+
+   call AFI_ComputeAirfoilCoefsRotCor2D_Impl( AOA, SecondProp, p, AFI_interp, errStat, errMsg )
+
+end subroutine AFI_ComputeAirfoilCoefsRotCor2D
+!----------------------------------------------------------------------------------------------------------------------------------
+subroutine AFI_ComputeUACoefsRotCor1D( p, UA_BL, errStat, errMsg )
+
+   type(AFI_ParameterType), intent(in   ) :: p
+   type(AFI_UA_BL_Type),    intent(  out) :: UA_BL
+   integer(IntKi),          intent(  out) :: errStat
+   character(*),            intent(  out) :: errMsg
+
+   call AFI_ComputeUACoefsRotCor1D_Impl( p, UA_BL, errStat, errMsg )
+
+end subroutine AFI_ComputeUACoefsRotCor1D
+!----------------------------------------------------------------------------------------------------------------------------------
+subroutine AFI_ComputeUACoefsRotCor2D( SecondProp, p, UA_BL, errStat, errMsg )
+
+   real(ReKi),              intent(in   ) :: SecondProp
+   type(AFI_ParameterType), intent(in   ) :: p
+   type(AFI_UA_BL_Type),    intent(  out) :: UA_BL
+   integer(IntKi),          intent(  out) :: errStat
+   character(*),            intent(  out) :: errMsg
+
+   call AFI_ComputeUACoefsRotCor2D_Impl( SecondProp, p, UA_BL, errStat, errMsg )
+
+end subroutine AFI_ComputeUACoefsRotCor2D
+!----------------------------------------------------------------------------------------------------------------------------------
+subroutine AFI_CalcSnel(AFInfo, snel_factor)
+   implicit none
+   type(AFI_ParameterType),      intent(in   )  :: AFInfo
+   real(ReKi),                   intent(  out)  :: snel_factor
+
+   call AFI_CalcSnel_Impl(AFInfo, snel_factor)
+
+end subroutine AFI_CalcSnel
 !=============================================================================
-   
+
 END MODULE AirfoilInfo

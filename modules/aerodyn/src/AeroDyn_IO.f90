@@ -986,6 +986,12 @@ SUBROUTINE ParsePrimaryFileInfo( PriPath, InitInp, InputFile, RootName, NumBlade
       ! AFTabMod - Interpolation method for multiple airfoil tables {1=1D interpolation on AoA (first table only); 2=2D interpolation on AoA and Re; 3=2D interpolation on AoA and UserProp} (-)
    call ParseVar( FileInfo_In, CurLine, "AFTabMod", InputFileData%AFTabMod, ErrStat2, ErrMsg2, UnEc )
       if (Failed()) return
+      ! RotCor - Switch to indicate which rotational correction model to apply to the airfoil data tables (0 for none)
+   call ParseVar( FileInfo_In, CurLine, "RotCor", InputFileData%RotCor, ErrStat2, ErrMsg2, UnEc )
+      if (Failed()) return	 
+   if (InputFileData%RotCor < 0 .or. InputFileData%RotCor > 3) then
+      call LegacyAbort('RotCor must be 0, 1, 2, or 3.'); return
+   end if
       ! InCol_Alfa - The column in the airfoil tables that contains the angle of attack (-)
    call ParseVar( FileInfo_In, CurLine, "InCol_Alfa", InputFileData%InCol_Alfa, ErrStat2, ErrMsg2, UnEc )
       if (Failed()) return
@@ -1217,6 +1223,11 @@ SUBROUTINE ParsePrimaryFileInfo( PriPath, InitInp, InputFile, RootName, NumBlade
          call LegacyAbort('Legacy option SkewMod is not 0, 1,2  which is not supported.'); return
       endif
    endif
+
+   if (InputFileData%RotCor > 0 .and. InputFileData%Wake_Mod /= WakeMod_BEMT) then
+      call SetErrStat(ErrID_Warn, 'RotCor is enabled but Wake_Mod is not BEMT; RotCor will be disabled for this run.', ErrStat, ErrMsg, RoutineName)
+      InputFileData%RotCor = 0
+   end if
 
    !====== Print new and old inputs =====================================================================
    if (wakeModProvided .or. frozenWakeProvided .or. skewModProvided .or. AFAeroModProvided .or. UAModProvided) then

@@ -1834,7 +1834,7 @@ subroutine AD_UpdateStates( t, n, u, utimes, p, x, xd, z, OtherState, m, errStat
    integer(IntKi),                 intent(in   ) :: n          !< Current simulation time step n = 0,1,...
    type(AD_InputType),             intent(inout) :: u(:)       !< Inputs at utimes (out only for mesh record-keeping in ExtrapInterp routine)
    real(DbKi),                     intent(in   ) :: utimes(:)  !< Times associated with u(:), in seconds
-   type(AD_ParameterType),         intent(in   ) :: p          !< Parameters
+   type(AD_ParameterType),         intent(inout) :: p          !< Parameters
    type(AD_ContinuousStateType),   intent(inout) :: x          !< Input: Continuous states at t;
                                                                !!   Output: Continuous states at t + Interval
    type(AD_DiscreteStateType),     intent(inout) :: xd         !< Input: Discrete states at t;
@@ -2153,7 +2153,7 @@ subroutine AD_CalcOutput( t, u, p, x, xd, z, OtherState, y, m, ErrStat, ErrMsg, 
 
    REAL(DbKi),                   INTENT(IN   )  :: t           !< Current simulation time in seconds
    TYPE(AD_InputType),           INTENT(IN   )  :: u           !< Inputs at Time t
-   TYPE(AD_ParameterType),       INTENT(IN   )  :: p           !< Parameters
+   TYPE(AD_ParameterType),       INTENT(INOUT)  :: p           !< Parameters
    TYPE(AD_ContinuousStateType), INTENT(IN   )  :: x           !< Continuous states at t
    TYPE(AD_DiscreteStateType),   INTENT(IN   )  :: xd          !< Discrete states at t
    TYPE(AD_ConstraintStateType), INTENT(IN   )  :: z           !< Constraint states at t
@@ -2235,7 +2235,7 @@ subroutine RotCalcOutput( t, u, RotInflow, p, p_AD, x, xd, z, OtherState, y, m, 
    TYPE(RotInputType),           INTENT(IN   )  :: u                  !< Inputs at Time t
    TYPE(RotInflowType),          INTENT(IN   )  :: RotInflow          !< Rotor Inflow at Time t
    TYPE(RotParameterType),       INTENT(IN   )  :: p                  !< Parameters
-   TYPE(AD_ParameterType),       INTENT(IN   )  :: p_AD               !< Parameters
+   TYPE(AD_ParameterType),       INTENT(INOUT)  :: p_AD               !< Parameters
    TYPE(RotContinuousStateType), INTENT(IN   )  :: x                  !< Continuous states at t
    TYPE(RotDiscreteStateType),   INTENT(IN   )  :: xd                 !< Discrete states at t
    TYPE(RotConstraintStateType), INTENT(IN   )  :: z                  !< Constraint states at t
@@ -3017,7 +3017,7 @@ subroutine AD_CalcConstrStateResidual( Time, u, p, x, xd, z, OtherState, m, z_re
 
    REAL(DbKi),                   INTENT(IN   )   :: Time        !< Current simulation time in seconds
    TYPE(AD_InputType),           INTENT(IN   )   :: u           !< Inputs at Time
-   TYPE(AD_ParameterType),       INTENT(IN   )   :: p           !< Parameters
+   TYPE(AD_ParameterType),       INTENT(INOUT)   :: p           !< Parameters
    TYPE(AD_ContinuousStateType), INTENT(IN   )   :: x           !< Continuous states at Time
    TYPE(AD_DiscreteStateType),   INTENT(IN   )   :: xd          !< Discrete states at Time
    TYPE(AD_ConstraintStateType), INTENT(IN   )   :: z           !< Constraint states at Time (possibly a guess)
@@ -3055,7 +3055,7 @@ subroutine RotCalcConstrStateResidual( Time, u, RotInflow, p, p_AD, x, xd, z, Ot
    TYPE(RotInputType),           INTENT(IN   )   :: u           !< Inputs at Time
    TYPE(RotInflowType),          INTENT(IN   )   :: RotInflow   !< rotor inflow at Time
    TYPE(RotParameterType),       INTENT(IN   )   :: p           !< Parameters
-   TYPE(AD_ParameterType),       INTENT(IN   )   :: p_AD        !< Parameters
+   TYPE(AD_ParameterType),       INTENT(INOUT)   :: p_AD        !< Parameters
    TYPE(RotContinuousStateType), INTENT(IN   )   :: x           !< Continuous states at Time
    TYPE(RotDiscreteStateType),   INTENT(IN   )   :: xd          !< Discrete states at Time
    TYPE(RotConstraintStateType), INTENT(IN   )   :: z           !< Constraint states at Time (possibly a guess)
@@ -3100,7 +3100,7 @@ subroutine RotCalcContStateDeriv( t, u, RotInflow, p, p_AD, x, xd, z, OtherState
    TYPE(RotInputType),             INTENT(IN   )  :: u           ! Inputs at t
    TYPE(RotInflowType),            INTENT(IN   )  :: RotInflow   !< Rotor inflow Inputs at Time
    TYPE(RotParameterType),         INTENT(IN   )  :: p           ! Parameters
-   TYPE(AD_ParameterType),         INTENT(IN   )  :: p_AD        ! Parameters
+   TYPE(AD_ParameterType),         INTENT(INOUT)  :: p_AD        ! Parameters
    TYPE(RotContinuousStateType),   INTENT(IN   )  :: x           ! Continuous states at t
    TYPE(RotDiscreteStateType),     INTENT(IN   )  :: xd          ! Discrete states at t
    TYPE(RotConstraintStateType),   INTENT(IN   )  :: z           ! Constraint states at t
@@ -4204,6 +4204,7 @@ subroutine SetOutputsFromFVW(t, u, p, OtherState, x, xd, m, y, ErrStat, ErrMsg)
 
             ! Compute steady Airfoil Coefs no matter what..
             call AFI_ComputeAirfoilCoefs( alpha, Re, 0.0_ReKi,  p%AFI(p%FVW%W(iW)%AFindx(j,1)), AFI_interp, ErrStat, ErrMsg )
+   
             Cl_Static = AFI_interp%Cl
             Cd_Static = AFI_interp%Cd
             Cm_Static = AFI_interp%Cm
@@ -4751,6 +4752,13 @@ SUBROUTINE Init_AFIparams( InputFileData, p_AFI, UnEc, RootName, ErrStat, ErrMsg
    AFI_InitInputs%InCol_Cpmin = InputFileData%InCol_Cpmin
    AFI_InitInputs%AFTabMod    = InputFileData%AFTabMod !AFITable_1
    AFI_InitInputs%UAMod       = InputFileData%UA_Init%UAMod
+   AFI_InitInputs%RotCorParams%RotCor       = InputFileData%RotCor
+
+   ! RotCor is only used by the BEMT path (which computes local snel factor).
+   if (AFI_InitInputs%RotCorParams%RotCor > 0 .and. InputFileData%Wake_Mod /= WakeMod_BEMT) then
+      call SetErrStat(ErrID_Warn, 'RotCor is enabled but Wake_Mod is not BEMT; disabling RotCor table precomputation.', ErrStat, ErrMsg, RoutineName)
+      AFI_InitInputs%RotCorParams%RotCor = 0
+   end if
    
       ! Call AFI_Init to read in and process the airfoil files.
       ! This includes creating the spline coefficients to be used for interpolation.
@@ -5003,7 +5011,6 @@ SUBROUTINE Init_BEMTmodule( InputFileData, RotInputFileData, u_AD, u, p, p_AD, x
       InitInp%rTipFix(k) = sqrt( tmp_sz + tmp_sz_y )
             
    end do !k=blades
-   
    
    InitInp%UA_Init%UAOff_innerNode = 0
    InitInp%UA_Init%UAOff_outerNode = p%NumBlNds + 1
@@ -6309,7 +6316,7 @@ SUBROUTINE AD_JacobianPInput(Vars, iRotor, t, u_AD, p_AD, x_AD, xd_AD, z_AD, Oth
    INTEGER(IntKi),                       INTENT(IN   )   :: iRotor         !< Rotor index
    REAL(DbKi),                           INTENT(IN   )   :: t              !< Time in seconds at operating point
    TYPE(AD_InputType),                   INTENT(INOUT)   :: u_AD           !< Inputs at operating point (may change to inout if a mesh copy is required)
-   TYPE(AD_ParameterType),               INTENT(IN   )   :: p_AD           !< Parameters
+   TYPE(AD_ParameterType),               INTENT(INOUT)   :: p_AD           !< Parameters
    TYPE(AD_ContinuousStateType),         INTENT(IN   )   :: x_AD           !< Continuous states at operating point
    TYPE(AD_DiscreteStateType),           INTENT(IN   )   :: xd_AD          !< Discrete states at operating point
    TYPE(AD_ConstraintStateType),         INTENT(IN   )   :: z_AD           !< Constraint states at operating point
@@ -6569,7 +6576,7 @@ SUBROUTINE AD_JacobianPContState(Vars, iRotor, t, u, p, x, xd, z, OtherState, y,
    INTEGER(IntKi),                       INTENT(IN   )           :: iRotor     !< Rotor index
    REAL(DbKi),                           INTENT(IN   )           :: t          !< Time in seconds at operating point
    TYPE(AD_InputType),                   INTENT(IN   )           :: u          !< Inputs at operating point (may change to inout if a mesh copy is required)
-   TYPE(AD_ParameterType),               INTENT(IN   )           :: p          !< Parameters
+   TYPE(AD_ParameterType),               INTENT(INOUT)           :: p          !< Parameters
    TYPE(AD_ContinuousStateType),         INTENT(IN   )           :: x          !< Continuous states at operating point
    TYPE(AD_DiscreteStateType),           INTENT(IN   )           :: xd         !< Discrete states at operating point
    TYPE(AD_ConstraintStateType),         INTENT(IN   )           :: z          !< Constraint states at operating point
@@ -6614,7 +6621,7 @@ SUBROUTINE RotJacobianPContState(Vars, iRotor, t, u, RotInflow, p, p_AD, x, xd, 
    TYPE(RotInputType),                   INTENT(IN   )           :: u          !< Inputs at operating point (may change to inout if a mesh copy is required)
    TYPE(RotInflowType),                  INTENT(IN   )           :: RotInflow  !< Rotor inflow
    TYPE(RotParameterType),               INTENT(IN   )           :: p          !< Parameters
-   TYPE(AD_ParameterType),               INTENT(IN   )           :: p_AD       !< Parameters
+   TYPE(AD_ParameterType),               INTENT(INOUT)           :: p_AD       !< Parameters
    TYPE(RotContinuousStateType),         INTENT(IN   )           :: x          !< Continuous states at operating point
    TYPE(RotDiscreteStateType),           INTENT(IN   )           :: xd         !< Discrete states at operating point
    TYPE(RotConstraintStateType),         INTENT(IN   )           :: z          !< Constraint states at operating point
@@ -6766,7 +6773,7 @@ SUBROUTINE AD_JacobianPDiscState(Vars, t, u, p, x, xd, z, OtherState, y, m, ErrS
    TYPE(ModVarsType),                    INTENT(IN   )           :: Vars       !< Module variables for packing arrays
    REAL(DbKi),                           INTENT(IN   )           :: t          !< Time in seconds at operating point
    TYPE(AD_InputType),                   INTENT(IN   )           :: u          !< Inputs at operating point (may change to inout if a mesh copy is required)
-   TYPE(AD_ParameterType),               INTENT(IN   )           :: p          !< Parameters
+   TYPE(AD_ParameterType),               INTENT(INOUT)           :: p          !< Parameters
    TYPE(AD_ContinuousStateType),         INTENT(IN   )           :: x          !< Continuous states at operating point
    TYPE(AD_DiscreteStateType),           INTENT(IN   )           :: xd         !< Discrete states at operating point
    TYPE(AD_ConstraintStateType),         INTENT(IN   )           :: z          !< Constraint states at operating point
@@ -6805,7 +6812,7 @@ SUBROUTINE AD_JacobianPConstrState(Vars, t, u, p, x, xd, z, OtherState, y, m, Er
    TYPE(ModVarsType),                    INTENT(IN   )           :: Vars       !< Module variables for packing arrays
    REAL(DbKi),                           INTENT(IN   )           :: t          !< Time in seconds at operating point
    TYPE(AD_InputType),                   INTENT(IN   )           :: u          !< Inputs at operating point (may change to inout if a mesh copy is required)
-   TYPE(AD_ParameterType),               INTENT(IN   )           :: p          !< Parameters
+   TYPE(AD_ParameterType),               INTENT(INOUT)           :: p          !< Parameters
    TYPE(AD_ContinuousStateType),         INTENT(IN   )           :: x          !< Continuous states at operating point
    TYPE(AD_DiscreteStateType),           INTENT(IN   )           :: xd         !< Discrete states at operating point
    TYPE(AD_ConstraintStateType),         INTENT(IN   )           :: z          !< Constraint states at operating point
@@ -6844,7 +6851,7 @@ SUBROUTINE RotJacobianPConstrState( t, u, RotInflow, p, p_AD, x, xd, z, OtherSta
    TYPE(RotInputType),                   INTENT(IN   )           :: u          !< Inputs at operating point (may change to inout if a mesh copy is required)
    TYPE(RotInflowType),                  INTENT(IN   )           :: RotInflow  !< Inflow on rotor 
    TYPE(RotParameterType),               INTENT(IN   )           :: p          !< Parameters
-   TYPE(AD_ParameterType),               INTENT(IN   )           :: p_AD       !< Parameters
+   TYPE(AD_ParameterType),               INTENT(INOUT)           :: p_AD       !< Parameters
    TYPE(RotContinuousStateType),         INTENT(IN   )           :: x          !< Continuous states at operating point
    TYPE(RotDiscreteStateType),           INTENT(IN   )           :: xd         !< Discrete states at operating point
    TYPE(RotConstraintStateType),         INTENT(IN   )           :: z          !< Constraint states at operating point

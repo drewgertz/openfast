@@ -26,7 +26,7 @@ module BEMTUnCoupled
    use UnsteadyAero
    use UnsteadyAero_Types
    use BEMT_Types
-   use PolynomialRoots
+   use PolynomialRoots 
 
 
    implicit none
@@ -57,6 +57,7 @@ module BEMTUnCoupled
    public :: getHubTipLossCorrection
    public :: limitInductionFactors
    public :: GetEulerAnglesFromOrientation
+   public :: BEMT_calcSnel
    
    public :: VelocityIsZero
 
@@ -344,7 +345,7 @@ real(ReKi) function BEMTU_InductionWithResidual(p, u, i, j, phi, AFInfo, IsValid
    integer(IntKi),          intent(in   ) :: j                  !< index for blade
    
    real(ReKi),             intent(in   ) :: phi
-   type(AFI_ParameterType),intent(in   ) :: AFInfo
+   type(AFI_ParameterType),intent(inout) :: AFInfo
    logical,                intent(  out) :: IsValidSolution !< this is set to false if k<=1 in the propeller brake region or k<-1 in the momentum region, indicating an invalid solution
    integer(IntKi),         intent(  out) :: ErrStat       ! Error status of the operation
    character(*),           intent(  out) :: ErrMsg        ! Error message if ErrStat /= ErrID_None
@@ -403,8 +404,9 @@ real(ReKi) function BEMTU_InductionWithResidual(p, u, i, j, phi, AFInfo, IsValid
    ! FIX ME: Note that the Re used here is computed assuming axInduction and tanInduction are 0. Is that a problem for 2D Re interpolation on airfoils? or should update solve method to take this into account?
       call GetReynoldsNumber(p%BEM_Mod, 0.0_ReKi, 0.0_ReKi, u%Vx(i,j), u%Vy(i,j), u%Vz(i,j), p%chord(i,j), p%kinVisc, u%theta(i,j), phi, u%cantAngle(i,j), u%toeAngle(i,j),  Re)
 
-
-      call AFI_ComputeAirfoilCoefs( AOA, Re, u%UserProp(i,j),  AFInfo, AFI_interp, errStat2, errMsg2 )
+      call BEMT_calcSnel(AFInfo, p, u, i, j)
+      call AFI_ComputeAirfoilCoefs( AOA, Re, u%UserProp(i,j),  AFInfo, AFI_interp, errStat2, errMsg2 )  
+	  
          call SetErrStat( errStat2, errMsg2, errStat, errMsg, RoutineName ) 
          if (ErrStat >= AbortErrLev) return
       
@@ -448,6 +450,39 @@ real(ReKi) function BEMTU_InductionWithResidual(p, u, i, j, phi, AFInfo, IsValid
    if (present(F_out))  F_out = F
    
 end function BEMTU_InductionWithResidual
+!----------------------------------------------------------------------------------------------------------------------------------
+subroutine BEMT_CalcSnel(AFInfo, p, u, i, j)
+   ! @param RotCorParams: The output structure containing all assembled parameters.
+   ! @param p: The AeroDyn parameter structure.
+   ! @param u: The AeroDyn input structure.
+   ! @param i: The index for the blade node.
+   ! @param j: The index for the blade.
+
+   implicit none
+   
+   ! Variable declarations
+   type(AFI_ParameterType),        intent(inout)  :: AFInfo      ! The airfoil parameter data
+   type(BEMT_ParameterType),       intent(in   )  :: p           ! Parameters
+   type(BEMT_InputType),           intent(in   )  :: u           ! Inputs at Time t
+   integer(IntKi),                 intent(in   )  :: i, j     
+   real(ReKi)                                     :: snel_factor  
+
+   ! RotCor bookkeeping is only required when rotational correction is enabled.
+   if (AFInfo%RotCorParams%RotCor <= 0) then
+      AFInfo%RotCorParams%current_snel_factor = 0.0_ReKi
+      return
+   end if
+
+   ! Set up the rotational correction parameters on the temporary copy.
+   AFInfo%RotCorParams%tsr     = abs(u%TSR)
+   AFInfo%RotCorParams%rLocal  = u%rLocal(i,j)
+   AFInfo%RotCorParams%rMax    = p%rTipFixMax
+   AFInfo%RotCorParams%chord   = p%chord(i,j)
+
+   call AFI_CalcSnel(AFInfo, snel_factor)
+   AFInfo%RotCorParams%current_snel_factor = snel_factor
+   
+end subroutine BEMT_CalcSnel
 !-----------------------------------------------------------------------------------------
 subroutine ApplySkewedWakeCorrection(BEM_Mod, SkewRedistrMod, yawCorrFactor, F, azimuth, azimuthOffset, chi0, tipRatio, a, chi, FirstWarn )
    

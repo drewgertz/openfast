@@ -93,7 +93,7 @@ IMPLICIT NONE
     REAL(ReKi) , DIMENSION(1:3)  :: TFinAStar = 0.0_ReKi      !< Tail fin characteristics angles for separation functions [deg]
     REAL(ReKi)  :: TFinKv = 0.0_ReKi      !< Tail fin vortex lift coefficient for unsteady aerodynamics [-]
     REAL(ReKi)  :: TFinCDc = 0.0_ReKi      !< Tail fin drag coefficient for unsteady aerodynamics [-]
-  END TYPE TFinInputFileType
+   END TYPE TFinInputFileType
 ! =======================
 ! =========  AD_VTK_BLSurfaceType  =======
   TYPE, PUBLIC :: AD_VTK_BLSurfaceType
@@ -273,6 +273,7 @@ IMPLICIT NONE
     REAL(ReKi)  :: UAStartRad = 0.0_ReKi      !< Starting [radius]
     REAL(ReKi)  :: UAEndRad = 0.0_ReKi      !< Ending [radius]
     TYPE(RotInputFile) , DIMENSION(:), ALLOCATABLE  :: rotors      !< Rotor (blades and tower) input file data [-]
+	integer(IntKi) :: RotCor = 0_IntKi      ! 0=None, 1=Snel
   END TYPE AD_InputFile
 ! =======================
 ! =========  RotContinuousStateType  =======

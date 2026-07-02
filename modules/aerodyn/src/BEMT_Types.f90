@@ -175,6 +175,7 @@ IMPLICIT NONE
     REAL(ReKi) , DIMENSION(:,:), ALLOCATABLE  :: IntegrateWeight      !< A weighting factor for calculating rotor-averaged values (e.g., AxInd) [-]
     INTEGER(IntKi)  :: lin_nx = 0      !< Number of continuous states for linearization [-]
     INTEGER(IntKi)  :: BEM_Mod = 0_IntKi      !< BEM Model 0=OpenFAST 2=Envision  [-]
+	real(ReKi)               :: rMax          ! blade tip radius for rotational correction	
   END TYPE BEMT_ParameterType
 ! =======================
 ! =========  BEMT_InputType  =======
