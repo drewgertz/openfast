@@ -174,10 +174,18 @@ IMPLICIT NONE
     REAL(ReKi)  :: AirDens = 0.0_ReKi      !< Air density [kg/m^3]
     CHARACTER(ChanLen) , DIMENSION(:), ALLOCATABLE  :: WriteOutputHdr      !< Names of the output-to-file channels [-]
     CHARACTER(ChanLen) , DIMENSION(:), ALLOCATABLE  :: WriteOutputUnt      !< Units of the output-to-file channels [-]
+      CHARACTER(ChanLen) , DIMENSION(:), ALLOCATABLE  :: LinNames_y      !< Names of the linearized outputs for y [-]
+      CHARACTER(ChanLen) , DIMENSION(:), ALLOCATABLE  :: LinNames_u      !< Names of the linearized inputs for u [-]
+      CHARACTER(ChanLen) , DIMENSION(:), ALLOCATABLE  :: LinNames_x      !< Names of the linearized states for x [-]
     TYPE(AD_BladeShape) , DIMENSION(:), ALLOCATABLE  :: BladeShape      !< airfoil coordinates for each blade [m]
     TYPE(AD_BladePropsType) , DIMENSION(:), ALLOCATABLE  :: BladeProps      !< blade property information from blade input files [-]
     REAL(ReKi) , DIMENSION(:), ALLOCATABLE  :: TwrElev      !< Elevation at tower node [m]
     REAL(ReKi) , DIMENSION(:), ALLOCATABLE  :: TwrDiam      !< Diameter of tower at node [m]
+      LOGICAL , DIMENSION(:), ALLOCATABLE  :: RotFrame_y      !< Flags for y linearization outputs in rotating frame [-]
+      LOGICAL , DIMENSION(:), ALLOCATABLE  :: RotFrame_u      !< Flags for u linearization outputs in rotating frame [-]
+      LOGICAL , DIMENSION(:), ALLOCATABLE  :: RotFrame_x      !< Flags for x linearization states in rotating frame [-]
+      INTEGER(IntKi) , DIMENSION(:), ALLOCATABLE  :: DerivOrder_x      !< Derivative order for x linearization states [-]
+      LOGICAL , DIMENSION(:), ALLOCATABLE  :: IsLoad_u      !< Flags for u linearization inputs that are loads [-]
   END TYPE RotInitOutputType
 ! =======================
 ! =========  AD_InitOutputType  =======
@@ -209,6 +217,27 @@ IMPLICIT NONE
     CHARACTER(1024)  :: TFinFile      !< Input file for tail fin aerodynamics [used only when TFinAero=True] [-]
     TYPE(TFinInputFileType)  :: TFin      !< Input file data for tail fin [-]
   END TYPE RotInputFile
+
+! =======================
+! =========  Jacobian index bookkeeping  =======
+   TYPE, PUBLIC :: Jac_u_idxStartListType
+      INTEGER(IntKi)  :: Nacelle = 0_IntKi
+      INTEGER(IntKi)  :: Hub = 0_IntKi
+      INTEGER(IntKi)  :: TFin = 0_IntKi
+      INTEGER(IntKi)  :: Tower = 0_IntKi
+      INTEGER(IntKi)  :: BladeRoot = 0_IntKi
+      INTEGER(IntKi)  :: Blade = 0_IntKi
+      INTEGER(IntKi)  :: UserProp = 0_IntKi
+      INTEGER(IntKi)  :: Extended = 0_IntKi
+   END TYPE Jac_u_idxStartListType
+
+   TYPE, PUBLIC :: Jac_y_idxStartListType
+      INTEGER(IntKi)  :: NacelleLoad = 0_IntKi
+      INTEGER(IntKi)  :: HubLoad = 0_IntKi
+      INTEGER(IntKi)  :: TFinLoad = 0_IntKi
+      INTEGER(IntKi)  :: TowerLoad = 0_IntKi
+      INTEGER(IntKi)  :: BladeLoad = 0_IntKi
+   END TYPE Jac_y_idxStartListType
 ! =======================
 ! =========  AD_InputFile  =======
   TYPE, PUBLIC :: AD_InputFile
@@ -221,6 +250,7 @@ IMPLICIT NONE
     INTEGER(IntKi)  :: TwrAero = 0_IntKi      !< Calculate tower aerodynamic loads? {0=none, 1=aero without VIV, 2=aero with VIV} [-]
     LOGICAL  :: CavitCheck = .false.      !< Flag that tells us if we want to check for cavitation [-]
     LOGICAL  :: NacelleDrag = .false.      !< Include NacelleDrag effects? [flag]
+   LOGICAL  :: Buoyancy = .false.      !< Include buoyancy effects? [flag]
     LOGICAL  :: CompAA = .false.      !< Compute AeroAcoustic noise [flag]
     CHARACTER(1024)  :: AA_InputFile      !< AeroAcoustics input file name [quoted strings]
     CHARACTER(1024) , DIMENSION(:), ALLOCATABLE  :: ADBlFile      !< AD blade file (NumBl filenames) [quoted strings]
@@ -385,6 +415,9 @@ IMPLICIT NONE
     REAL(ReKi) , DIMENSION(:), ALLOCATABLE  :: TwrAT      !< Array of tower node tangential added mass factor [kg/m]
     TYPE(BEMT_ParameterType)  :: BEMT      !< Parameters for BEMT module [-]
     TYPE(AA_ParameterType)  :: AA      !< Parameters for AA module [-]
+   TYPE(Jac_u_idxStartListType)  :: Jac_u_idxStartList      !< Starting indices for u Jacobian bookkeeping [-]
+   TYPE(Jac_y_idxStartListType)  :: Jac_y_idxStartList      !< Starting indices for y Jacobian bookkeeping [-]
+   INTEGER(IntKi) , DIMENSION(:,:), ALLOCATABLE  :: Jac_u_indx      !< Jacobian input index bookkeeping [-]
     INTEGER(IntKi)  :: NumExtendedInputs = 0_IntKi      !< number of extended inputs [-]
     REAL(ReKi) , DIMENSION(:), ALLOCATABLE  :: du      !< vector that determines size of perturbation for u (inputs) [-]
     REAL(ReKi) , DIMENSION(:), ALLOCATABLE  :: dx      !< vector that determines size of perturbation for x (continuous states) [-]

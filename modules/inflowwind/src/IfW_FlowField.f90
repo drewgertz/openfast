@@ -27,6 +27,7 @@ implicit none
 public IfW_FlowField_GetVelAcc
 public IfW_UniformField_CalcAccel, IfW_Grid3DField_CalcAccel
 public Grid3D_to_Uniform, Uniform_to_Grid3D
+public UniformField_InterpLinear, UniformField_InterpCubic
 
 integer(IntKi), parameter  :: WindProfileType_None = -1     !< don't add wind profile; already included in input
 integer(IntKi), parameter  :: WindProfileType_Constant = 0  !< constant wind
