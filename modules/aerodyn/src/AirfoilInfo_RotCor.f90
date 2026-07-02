@@ -296,8 +296,8 @@ subroutine AFI_ComputeAirfoilCoefsFromRotCorTable( AOA, RotCorTable, p, AFI_inte
       call MPi2Pi ( Alpha ) ! change AOA into range of -pi to pi
       
       ! Spline interpolation based on requested AOA
-      IntAFCoefs(1:s1) = CubicSplineInterpM( Alpha, RotCorTable%Alpha, RotCorTable%Coefs, &
-                                             RotCorTable%SplineCoefs, ErrStat, ErrMsg )
+      call CubicSplineInterpM( Alpha, RotCorTable%Alpha, RotCorTable%Coefs, &
+                   RotCorTable%SplineCoefs, IntAFCoefs(1:s1) )
    end if
   
    AFI_interp%Cl    = IntAFCoefs(p%ColCl)
